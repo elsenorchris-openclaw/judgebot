@@ -4,6 +4,119 @@ A judgment-first Kalshi trading bot for daily weather markets. Claude is the
 entry+exit decision-maker; deterministic guardrails wrap the LLM so the
 worst-case blast radius is bounded by code, not by prompt quality.
 
+
+## Push pure-code entry window tightened — 2026-05-19 18:58 UTC
+
+Tightened the per-(station, series) decision window in `nn_shadow_worker._in_decision_window`:
+
+  config.py
+    PUSH_PEAK_HOURS_BEFORE:     2.5  -> 1.0
+    PUSH_PEAK_HOURS_AFTER_HIGH: 1.5  -> 0.5
+    PUSH_PEAK_HOURS_AFTER_LOW:  0.5  (unchanged)
+    PUSH_PEAK_HOURS_AFTER:      1.5  -> 0.5   # deprecated compat read
+
+Window is now [peak-1.0h, peak+0.5h] for BOTH HIGH and LOW (was [peak-2.5h,
+peak+1.5h] HIGH and [peak-2.5h, peak+0.5h] LOW).
+
+Driver: 23 post-hotfix BUYs on 5/19 had mean h_to_peak = -2.15h (median -2.48,
+0/23 inside +/-30min). Position-cap-of-1 + ASAP-fire-at-window-open pinned every
+entry at the far-left edge of the old window, exactly where backtest shows the
+worst edge (50% wr in the [-2.5, -1.5h] bucket).
+
+Backtest n=157 settled BUYs 5/14-5/19 (LLM-era + push-era):
+
+  Window                  n   wr   pnl/$   sum$
+  [-2.5, +1.5h] (old)    83  61%  +1.04   +$544
+  [-1.0, +0.5h] (NEW)    32  75%  +1.66   +$372
+  [-0.5, +0.5h]          13  85%  +2.05   +$85
+
+BUY_NO in shipped window: n=24, 88% wr, +$383.
+BUY_YES in shipped window: n=8, 38% wr, -$11 (bleeds in every window — open
+follow-up, separate ship).
+
+LOO-by-date holds 64-79% wr across all 6 days.
+
+Verification: post-restart shadow log shows window debug strings
+`outside_window KMDW/HIGH/NO: peak=13 window=[12.0,13.5]` etc., confirming
+new bounds active. 22/23 of today's pre-restart BUYs would have been blocked
+under the new window.
+
+Tooling: `/home/ubuntu/tools/window_backtest_20260519/backtest.py` — h_to_peak
+vs settled PnL, window sweep, LOO. Reusable for future window/edge analyses.
+
+Backup: `config.py.bak.pre_window_tighten_20260519_185624`.
+
+## Per-(station, series, month) push window overrides — 2026-05-19 19:43 UTC
+
+Followup to the 18:58 global-window tightening above. An 800-day backtest
+showed substantial city + month variance in optimal entry windows:
+e.g. ATL HIGH May best window is [13.0, 15.0] LST (peak −2.62 / peak −0.62),
+whereas SEA HIGH May is [14.0, 16.0] LST (peak −1.90 / peak +0.10). A single
+global setting can't capture this — overrides do.
+
+New behavior:
+  config.py
+    USE_PUSH_WINDOW_OVERRIDES: bool = True    # new flag
+
+  nn_shadow_worker._in_decision_window(...)
+    if USE_PUSH_WINDOW_OVERRIDES and (station, series, month) in PUSH_WINDOW_OVERRIDES:
+        before, after = PUSH_WINDOW_OVERRIDES[(station, series, month)]
+        # src=override in debug string
+    else:
+        # fall back to PUSH_PEAK_HOURS_BEFORE / AFTER_<HIGH|LOW>
+        # src=global in debug string
+
+`push_window_overrides.py` (new, 394 entries) defines:
+
+    PUSH_WINDOW_OVERRIDES: dict[tuple[str, str, int], tuple[float, float]] = {
+        ('KATL', 'HIGH',  1): (2.65, -0.65),
+        ('KATL', 'HIGH',  2): (1.03, -0.03),
+        ...
+    }
+
+Each value is `(BEFORE_h, AFTER_h)`; window opens at `peak − BEFORE`, closes at
+`peak + AFTER`.
+
+Generation pipeline:
+
+    /home/ubuntu/tools/per_hour_quality/per_hour_quality.py STATION [out_dir] [max_days]
+      runs nn_match.predict() at each LST hour x station-day x side; outputs
+      per-(station, month, hour, side) MAE/firing/settled grid CSV.
+    /home/ubuntu/tools/per_hour_quality/aggregate_phq.py
+      reads per-station CSVs + peak_dist.csv -> phq_combined.csv (6480 rows).
+    /home/ubuntu/tools/per_hour_quality/build_overrides.py
+      derives tight_win per (station, month, side); applies quality gates
+      (HIGH before in [0.5, 4.5], LOW before in [0.5, 5.5], after in
+       [-2.0/-2.5, 1.0/1.5], width >= 1h) -> 394 valid cells emitted.
+
+Cells outside the quality envelope fall back to global. 86 cells in the
+fallback set: 84 out-of-bounds (matcher's tight_win lands too far from
+peak — single-hour artifact in low-N data) and 2 have no qualifying window
+(KDCA LOW Feb, KDEN LOW May — overnight ASOS gaps).
+
+Coverage source: 800 most-recent station-days per station (~25 months of
+data). Full 5000-day backtest in progress at
+`/home/ubuntu/data/per_hour_quality_full/`; when complete, regenerate via
+`build_overrides.py > push_window_overrides.py` and restart.
+
+Verification (post-restart 19:43:33 UTC, PID 56290):
+  ATL HIGH May 14:00 LST -> src=override window=[13.0,15.0] (inside) ✓
+  ATL HIGH May 15:30 LST -> src=override (outside; global would have allowed) ✓
+  KDEN LOW May 04:30 LST -> src=global window=[3.9,5.4] (fallback) ✓
+
+Tests: 350 passed (was 344, +6 new TestPushWindowOverrides) / 4 skipped / 1
+pre-existing fail (test_truncation_reduces_buy_no_edge_when_rm_in_yes,
+unrelated).
+
+Rollback:
+  Set USE_PUSH_WINDOW_OVERRIDES=False in config.py + restart, or
+  cp config.py.pre_window_overrides_20260519 config.py
+  cp nn_shadow_worker.py.pre_window_overrides_20260519 nn_shadow_worker.py
+  sudo systemctl restart paper-judge-bot.service
+
+Backups: `config.py.pre_window_overrides_20260519`,
+`nn_shadow_worker.py.pre_window_overrides_20260519`.
+
 ## NN_MATCH two-tier peak clamp — 2026-05-19 07:42 UTC
 
 `nn_match_fast.predict()` HIGH path now applies a two-tier cap on `mu_proj`,

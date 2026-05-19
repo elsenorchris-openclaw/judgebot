@@ -56,6 +56,8 @@ ASK_CHANGE_MIN_C = 1         # ignore BBO callbacks where ask didn't move ≥ th
 _started = False
 _stop_event = threading.Event()
 _wethr_thread: Optional[threading.Thread] = None
+_wethr_socket_thread: Optional[threading.Thread] = None
+WETHR_EVENT_SOCK_PATH = "/tmp/wethr_events.sock"
 _log_writer_lock = threading.Lock()
 _per_ticker_locks: dict[str, threading.Lock] = {}
 _per_ticker_locks_lock = threading.Lock()
@@ -154,6 +156,314 @@ def _signals_block(pkt: dict) -> dict:
         "past_peak_today": ctx.get("past_peak_today"),
         "past_min_today": ctx.get("past_min_today"),
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Per-station peak/min hour lookup (production pace_curves)
+# ─────────────────────────────────────────────────────────────────────────────
+_peak_table_cache: dict = {}     # station(K-prefix) -> {month_int: peak_hour}
+_min_table_cache: dict = {}       # station(K-prefix) -> {month_int: min_hour}
+_peak_table_loaded = False
+_peak_table_lock = threading.Lock()
+
+# Map K-prefixed station code → pace_curves series key (HIGH).
+# Built from the actual ticker prefixes observed in pace_curves_v2.json.
+_STATION_TO_HIGH_SERIES = {
+    "KATL": "KXHIGHTATL", "KAUS": "KXHIGHAUS",   "KBOS": "KXHIGHTBOS",
+    "KDCA": "KXHIGHTDC",  "KDEN": "KXHIGHDEN",   "KDFW": "KXHIGHTDAL",
+    "KHOU": "KXHIGHTHOU", "KLAS": "KXHIGHTLV",   "KLAX": "KXHIGHLAX",
+    "KMDW": "KXHIGHCHI",  "KMIA": "KXHIGHMIA",   "KMSP": "KXHIGHTMIN",
+    "KMSY": "KXHIGHTNOLA","KNYC": "KXHIGHNY",    "KOKC": "KXHIGHTOKC",
+    "KPHL": "KXHIGHPHIL", "KPHX": "KXHIGHTPHX",  "KSAT": "KXHIGHTSATX",
+    "KSEA": "KXHIGHTSEA", "KSFO": "KXHIGHTSFO",
+}
+_STATION_TO_LOW_SERIES = {
+    "KATL": "KXLOWTATL",  "KAUS": "KXLOWTAUS",   "KBOS": "KXLOWTBOS",
+    "KDCA": "KXLOWTDC",   "KDEN": "KXLOWTDEN",   "KDFW": "KXLOWTDAL",
+    "KHOU": "KXLOWTHOU",  "KLAS": "KXLOWTLV",    "KLAX": "KXLOWTLAX",
+    "KMDW": "KXLOWTCHI",  "KMIA": "KXLOWTMIA",   "KMSP": "KXLOWTMIN",
+    "KMSY": "KXLOWTNOLA", "KNYC": "KXLOWTNYC",   "KOKC": "KXLOWTOKC",
+    "KPHL": "KXLOWTPHIL", "KPHX": "KXLOWTPHX",   "KSAT": "KXLOWTSATX",
+    "KSEA": "KXLOWTSEA",  "KSFO": "KXLOWTSFO",
+}
+
+
+def _ensure_peak_tables_loaded() -> None:
+    """Load pace_curves once at first call. Builds station→{month: hour}."""
+    global _peak_table_loaded
+    if _peak_table_loaded:
+        return
+    with _peak_table_lock:
+        if _peak_table_loaded:
+            return
+        try:
+            import config as _cfg
+            high_path = getattr(_cfg, "PUSH_PACE_CURVES_HIGH_PATH",
+                                "/home/ubuntu/data/pace_curves_v2.json")
+            low_path = getattr(_cfg, "PUSH_PACE_CURVES_LOW_PATH",
+                               "/home/ubuntu/data/pace_curves_low_v2.json")
+            with open(high_path) as f:
+                high = json.load(f)
+            with open(low_path) as f:
+                low = json.load(f)
+            inverse_high = {v: k for k, v in _STATION_TO_HIGH_SERIES.items()}
+            inverse_low = {v: k for k, v in _STATION_TO_LOW_SERIES.items()}
+            for series_key, curve in (high.get("curves") or {}).items():
+                st = inverse_high.get(series_key)
+                if not st: continue
+                monthly = curve.get("monthly") or {}
+                row = {}
+                for m_str, m_data in monthly.items():
+                    try: m_int = int(m_str)
+                    except: continue
+                    ph = m_data.get("empirical_peak_hour_local")
+                    if ph is not None:
+                        row[m_int] = int(ph)
+                if row:
+                    _peak_table_cache[st] = row
+            for series_key, curve in (low.get("curves") or {}).items():
+                st = inverse_low.get(series_key)
+                if not st: continue
+                monthly = curve.get("monthly") or {}
+                row = {}
+                for m_str, m_data in monthly.items():
+                    try: m_int = int(m_str)
+                    except: continue
+                    mh = m_data.get("empirical_min_hour_local")
+                    if mh is not None:
+                        row[m_int] = int(mh)
+                if row:
+                    _min_table_cache[st] = row
+            _peak_table_loaded = True
+            log.info("peak/min hour tables loaded: HIGH=%d stations LOW=%d stations",
+                     len(_peak_table_cache), len(_min_table_cache))
+        except Exception as e:
+            log.exception("failed to load pace_curves: %s", e)
+
+
+def _lookup_peak_hour(station: str, series: str, climate_day: str) -> Optional[int]:
+    """Return empirical peak/min hour LST for (station, series, climate-month).
+    series ∈ {'HIGH','LOW'}. Returns None on lookup failure."""
+    _ensure_peak_tables_loaded()
+    try:
+        month = int(climate_day.split("-")[1])
+    except Exception:
+        return None
+    table = _peak_table_cache if series == "HIGH" else _min_table_cache
+    row = table.get(station) or {}
+    return row.get(month)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Per-station decision-window check (auto-execute gate)
+# ─────────────────────────────────────────────────────────────────────────────
+def _in_decision_window(station: str, series: str, local_hour: float,
+                        climate_day: str) -> tuple[bool, str]:
+    """Return (in_window, debug_str). Window is [peak_hr − BEFORE, peak_hr + AFTER]
+    using the empirical per-(station, month) peak/min hour from pace_curves.
+
+    BEFORE/AFTER selection:
+      1. If config.USE_PUSH_WINDOW_OVERRIDES is True AND (station, series, month)
+         is present in push_window_overrides.PUSH_WINDOW_OVERRIDES → use that.
+      2. Otherwise fall back to global PUSH_PEAK_HOURS_BEFORE / AFTER_<HIGH|LOW>.
+    """
+    if local_hour is None:
+        return False, "no_local_hour"
+    peak = _lookup_peak_hour(station, series, climate_day)
+    if peak is None:
+        return False, f"no_peak_for_{station}_{series}_{climate_day}"
+
+    before: Optional[float] = None
+    after: Optional[float] = None
+    src = "global"
+    try:
+        import config as _cfg
+        if getattr(_cfg, "USE_PUSH_WINDOW_OVERRIDES", False):
+            try:
+                from push_window_overrides import PUSH_WINDOW_OVERRIDES
+            except ImportError:
+                PUSH_WINDOW_OVERRIDES = {}
+            try:
+                month = int(climate_day.split("-")[1])
+            except Exception:
+                month = None
+            if month is not None:
+                ov = PUSH_WINDOW_OVERRIDES.get((station, series, month))
+                if ov is not None:
+                    before, after = float(ov[0]), float(ov[1])
+                    src = "override"
+        if before is None:
+            before = float(getattr(_cfg, "PUSH_PEAK_HOURS_BEFORE", 2.5))
+            if series == "HIGH":
+                after = float(getattr(_cfg, "PUSH_PEAK_HOURS_AFTER_HIGH",
+                                      getattr(_cfg, "PUSH_PEAK_HOURS_AFTER", 1.5)))
+            else:
+                after = float(getattr(_cfg, "PUSH_PEAK_HOURS_AFTER_LOW", 0.5))
+    except Exception:
+        before = 2.5
+        after = 1.5 if series == "HIGH" else 0.5
+        src = "fallback"
+
+    lo = peak - before
+    hi = peak + after
+    ok = (lo <= local_hour <= hi)
+    return ok, f"peak={peak} window=[{lo:.1f},{hi:.1f}] cur={local_hour:.2f} src={src}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Auto-execute via real Kalshi order (push pure-code architecture)
+# ─────────────────────────────────────────────────────────────────────────────
+def _try_auto_execute(cand, packet: dict, decision: dict,
+                      series: str, local_hour: float) -> tuple[bool, str]:
+    """Place a real Kalshi order for a pure-nn decision.
+
+    Returns (executed, reason). Safety checks (push pure-code arch 2026-05-19):
+      1. Direction-specific toggle ON (AUTO_EXECUTE_BUY_<NO|YES>_PUSH)
+      2. (station, series, hour) inside [peak-PUSH_PEAK_HOURS_BEFORE,
+         peak+PUSH_PEAK_HOURS_AFTER] using empirical per-(station, month)
+         peak/min hour from pace_curves.
+      3. Entry ask is within [PUSH_MIN_ENTRY_C, PUSH_MAX_ENTRY_C].
+      4. No existing position on this exact ticker.
+      5. Open position count for (station, series_prefix, direction)
+         below PUSH_MAX_TICKERS_PER_STATION_SIDE_DIRECTION.
+      6. Wallet has cash for min_buy.
+      7. Series correlation cap not exceeded.
+
+    Reuses paper_judge_bot.execute_buy() so all the freshness/drift/dust
+    safeguards apply identically to LLM-driven trades.
+    """
+    import config as _cfg
+    direction = decision.get("decision", "")  # "BUY_NO" or "BUY_YES"
+    if direction not in ("BUY_NO", "BUY_YES"):
+        return False, "not_a_buy"
+    short_dir = "NO" if direction == "BUY_NO" else "YES"
+    toggle_attr = f"AUTO_EXECUTE_BUY_{short_dir}_PUSH"
+    if not getattr(_cfg, toggle_attr, False):
+        return False, f"{toggle_attr}=False"
+    # (2) Decision window — peak-relative per (station, month, series)
+    in_win, win_dbg = _in_decision_window(cand.station, series, local_hour, cand.climate_day)
+    if not in_win:
+        return False, f"outside_window {cand.station}/{series}/{short_dir}: {win_dbg}"
+    if _rt is None:
+        return False, "rt_not_initialized"
+    # (3) Price floor/ceiling — entry must be in [min_c, max_c]
+    # 2026-05-19 v3: BUY_YES gets a higher floor (cheap-YES lottery trap).
+    max_c = int(getattr(_cfg, "PUSH_MAX_ENTRY_C", 90))
+    if direction == "BUY_YES":
+        min_c = int(getattr(_cfg, "PUSH_MIN_ENTRY_C_BUY_YES",
+                            getattr(_cfg, "PUSH_MIN_ENTRY_C", 25)))
+    else:
+        min_c = int(getattr(_cfg, "PUSH_MIN_ENTRY_C", 10))
+    ask_c = packet.get("yes_ask_c") if direction == "BUY_YES" else packet.get("no_ask_c")
+    if ask_c is None:
+        return False, f"no_ask_for_{direction}"
+    try:
+        ask_c_i = int(ask_c)
+    except (TypeError, ValueError):
+        return False, f"bad_ask_{direction}={ask_c}"
+    if ask_c_i < min_c or ask_c_i > max_c:
+        return False, f"price_oor ask={ask_c_i}c not in [{min_c},{max_c}]"
+    # (4) Position dedup — never add to existing position on this exact ticker
+    try:
+        pos = _rt.positions.get(cand.ticker) if hasattr(_rt, "positions") else None
+        if pos and float(pos.get("cost", 0)) > 0:
+            return False, f"already_held_cost_${float(pos.get('cost', 0)):.2f}"
+    except Exception:
+        pass
+    # (5) Position cap per (station, series_prefix, direction)
+    cap_per_dir = int(getattr(_cfg, "PUSH_MAX_TICKERS_PER_STATION_SIDE_DIRECTION", 1))
+    n_existing = 0
+    try:
+        if hasattr(_rt, "positions"):
+            series_prefix = cand.series_prefix  # "KXHIGH" or "KXLOW"
+            for tk, p in (_rt.positions or {}).items():
+                if not isinstance(p, dict):
+                    continue
+                try:
+                    if float(p.get("cost", 0)) <= 0:
+                        continue
+                except (TypeError, ValueError):
+                    continue
+                if p.get("station") != cand.station:
+                    continue
+                if not str(tk).startswith(series_prefix):
+                    continue
+                if p.get("action") != direction:
+                    continue
+                n_existing += 1
+    except Exception:
+        pass
+    if n_existing >= cap_per_dir:
+        return False, (f"position_cap {direction}@{cand.station}/{cand.series_prefix}: "
+                       f"{n_existing}>={cap_per_dir}")
+    # (6) Cash check
+    try:
+        import kalshi_client as _kc
+        balance = _kc.get_balance_cached()
+        min_buy = float(getattr(_cfg, "MIN_BUY_USD", 1.0))
+        if balance is not None and balance < min_buy:
+            return False, f"low_cash_${balance:.2f}<${min_buy:.2f}"
+    except Exception:
+        pass
+    # (7) Correlation cap (mirror LLM-path)
+    side_label = "HIGH" if cand.series_prefix == "KXHIGH" else "LOW"
+    cap_key = (cand.station, side_label, cand.climate_day)
+    try:
+        cap = _cfg.GUARDRAILS.get("max_buys_per_station_side", 999)
+        cycle_buys = getattr(_rt, "cycle_buys_by_station_side", {}).get(cap_key, 0)
+        if cycle_buys >= cap:
+            return False, f"correlation_cap {side_label}@{cand.station}"
+    except Exception:
+        pass
+    # Pre-populate packet._edge_info so execute_buy's _claude_prob_for_side
+    # can extract the prob. Our decision.read = "pure-nn auto: ..." has no
+    # P(NO)/P(YES) literal, so its regex returns None and code falls back
+    # to packet._edge_info. (Bug observed 2026-05-19: 11 push BUYs hit
+    # "no_prob_signal" rejection because _edge_info wasn't set.)
+    p_yes_raw = decision.get("p_yes")
+    if p_yes_raw is not None:
+        try:
+            p_yes_f = float(p_yes_raw)
+            if direction == "BUY_YES":
+                packet["_edge_info"] = {
+                    "side": "BUY_YES",
+                    "prob": p_yes_f,
+                    "mu_method": "nn_match_push",
+                }
+            else:  # BUY_NO
+                packet["_edge_info"] = {
+                    "side": "BUY_NO",
+                    "prob": 1.0 - p_yes_f,
+                    "mu_method": "nn_match_push",
+                }
+        except (TypeError, ValueError):
+            pass
+    # Construct EntryDecision and execute via the main bot's path
+    try:
+        import judgment
+        edge = decision.get("edge") or 0.0
+        size_factor = min(1.0, max(0.30, edge / 0.20))
+        entry_dec = judgment.EntryDecision(
+            decision=direction,
+            conviction=0.85,
+            size_factor=size_factor,
+            read=f"pure-nn auto: {(decision.get('reason') or '')[:200]}",
+            key_risks=["pure-nn auto-exec, no LLM review"],
+            what_would_change_my_mind=("rm crosses bracket boundary OR wethr probable updates "
+                                       "outside current bracket"),
+            obs_anchor="",
+            obs_anchor_valid=False,
+            obs_anchor_reason="pure-nn push auto-execute",
+            parse_ok=True,
+            parse_error=None,
+        )
+        import paper_judge_bot as _pjb
+        _pjb.execute_buy(_rt, cand, packet, entry_dec)
+        return True, (f"executed {direction} edge={edge*100:.1f}pp ask={ask_c_i}c "
+                      f"win={win_dbg}")
+    except Exception as e:
+        log.exception("auto-execute crashed for %s: %s", cand.ticker, e)
+        return False, f"exception: {e}"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -306,6 +616,17 @@ def _build_shadow_packet(cand: market_universe.Candidate) -> Optional[dict]:
     is_high = cand.series_prefix == "KXHIGH"
     rm = wethr.get("high_f") if is_high else wethr.get("low_f")
 
+    # Compute seconds_to_close (UTC seconds until LST midnight close) so
+    # execute_buy's guardrails.check_buy time-to-close gate doesn't reject
+    # with "0.0min < 30min". Without this field, packet.get("seconds_to_close")
+    # returns None → "or 0" → guardrails sees 0 seconds remaining.
+    try:
+        import paper_judge_bot as _pjb_for_close
+        close_ts = _pjb_for_close.lst_close_ts(cand.station, cand.climate_day)
+        secs_to_close = (close_ts - time.time()) if close_ts else None
+    except Exception:
+        secs_to_close = None
+
     pkt: dict = {
         "ticker": cand.ticker,
         "label": str(cand.bracket_label),
@@ -330,6 +651,7 @@ def _build_shadow_packet(cand: market_universe.Candidate) -> Optional[dict]:
         "running_min_or_max": rm,
         "hourly_obs_today": hourly_obs_today,
         "local_clock": ctx,
+        "seconds_to_close": secs_to_close,
     }
     return pkt
 
@@ -418,6 +740,24 @@ def _evaluate_ticker(ticker: str, trigger: str) -> None:
         else:
             _bump("evals_skip_decisions")
 
+        # 2026-05-19: push pure-code auto-execute. If decision is a BUY,
+        # check direction-specific toggle + per-station decision window.
+        # In-window BUYs become real Kalshi orders. Outside-window or
+        # toggled-off → shadow log only (no LLM fallback).
+        executed = False
+        executed_reason = "not_attempted"
+        local_clk = pkt.get("local_clock") or {}
+        local_hr = local_clk.get("local_hour")
+        series_label = "HIGH" if cand.series_prefix == "KXHIGH" else "LOW"
+        if decision["decision"] in ("BUY_NO", "BUY_YES"):
+            executed, executed_reason = _try_auto_execute(
+                cand, pkt, decision, series_label, local_hr,
+            )
+            if executed:
+                _bump(f"auto_exec_{decision['decision'].lower()}")
+            else:
+                _bump(f"auto_exec_skipped_{decision['decision'].lower()}")
+
         _log_shadow({
             "ts": time.time(),
             "trigger": trigger,
@@ -455,6 +795,10 @@ def _evaluate_ticker(ticker: str, trigger: str) -> None:
             "size_usd": decision.get("size_usd"),
             "rm_locked": decision.get("rm_locked"),
             "reason": decision.get("reason"),
+            # 2026-05-19: auto-execute outcome (push pure-code path)
+            "auto_exec_attempted": decision["decision"] in ("BUY_NO", "BUY_YES"),
+            "auto_exec_executed": executed,
+            "auto_exec_reason": executed_reason,
         })
     except Exception as e:
         _bump("evals_errors")
@@ -532,6 +876,63 @@ def _wethr_poll_loop() -> None:
         _stop_event.wait(WETHR_POLL_SEC)
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Push subscriber — Unix-socket subscription to wethr-cache-service events
+# ─────────────────────────────────────────────────────────────────────────────
+def _wethr_socket_subscriber_loop() -> None:
+    """Subscribe to wethr-cache-service's event socket and trigger
+    evaluations within milliseconds of an SSE event arriving. Replaces
+    the 5s file-poll latency. Falls back gracefully (file-poll still
+    runs as a long-cycle safety net)."""
+    import socket
+    backoff = 1.0
+    while not _stop_event.is_set():
+        try:
+            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            s.settimeout(5.0)
+            s.connect(WETHR_EVENT_SOCK_PATH)
+            s.settimeout(2.0)
+            log.info("subscribed to wethr events socket at %s", WETHR_EVENT_SOCK_PATH)
+            backoff = 1.0
+            buf = b""
+            while not _stop_event.is_set():
+                try:
+                    chunk = s.recv(4096)
+                except socket.timeout:
+                    continue
+                except Exception as e:
+                    log.warning("subscriber recv err: %s", e)
+                    break
+                if not chunk:
+                    log.info("subscriber: connection closed by server")
+                    break
+                buf += chunk
+                while b"\n" in buf:
+                    line, buf = buf.split(b"\n", 1)
+                    if not line.strip(): continue
+                    try:
+                        evt = json.loads(line)
+                    except Exception:
+                        continue
+                    _bump("wethr_socket_events")
+                    station = evt.get("station") or ""
+                    if not station: continue
+                    # Trigger evaluation for all subscribed tickers at this station
+                    for tk in _tickers_for_station(station):
+                        _bump("wethr_socket_evals_attempted")
+                        _evaluate_ticker(tk, trigger=f"sse_{evt.get('event_type', 'event')}")
+            try: s.close()
+            except Exception: pass
+        except (FileNotFoundError, ConnectionRefusedError) as e:
+            log.info("wethr event socket not available (%s); retry in %.0fs", e, backoff)
+            if _stop_event.wait(min(backoff, 30.0)): break
+            backoff = min(backoff * 2, 30.0)
+        except Exception as e:
+            log.warning("subscriber outer err: %s; retry in %.0fs", e, backoff)
+            if _stop_event.wait(min(backoff, 30.0)): break
+            backoff = min(backoff * 2, 30.0)
+
+
 def _tickers_for_station(station: str) -> list[str]:
     """Subscribed tickers whose station matches. Read from kalshi_ws's
     subscription set."""
@@ -549,8 +950,14 @@ def _tickers_for_station(station: str) -> list[str]:
 # Public lifecycle
 # ─────────────────────────────────────────────────────────────────────────────
 def start(rt) -> None:
-    """Register the WS callback and start the wethr poll thread. Idempotent."""
-    global _started, _rt, _wethr_thread
+    """Register the WS callback and start the wethr threads. Idempotent.
+
+    Spawns TWO wethr threads:
+      1. Socket subscriber — push notifications from wethr-cache-service
+         (sub-50ms latency vs the old 5s polling).
+      2. File poll — long-cycle fallback (60s) if socket disconnects.
+    """
+    global _started, _rt, _wethr_thread, _wethr_socket_thread
     if _started:
         return
     _rt = rt
@@ -562,12 +969,18 @@ def start(rt) -> None:
     except Exception as e:
         log.exception("kalshi_ws.register_bbo_callback failed: %s", e)
         return
+    _wethr_socket_thread = threading.Thread(
+        target=_wethr_socket_subscriber_loop,
+        name="nn_shadow_wethr_socket", daemon=True,
+    )
+    _wethr_socket_thread.start()
     _wethr_thread = threading.Thread(
         target=_wethr_poll_loop, name="nn_shadow_wethr_poll", daemon=True
     )
     _wethr_thread.start()
     _started = True
-    log.info("nn_shadow_worker started: WS callback registered, wethr poll thread alive")
+    log.info("nn_shadow_worker started: WS callback + socket subscriber + "
+             "file-poll fallback all alive")
 
 
 def stop() -> None:
@@ -580,6 +993,8 @@ def stop() -> None:
         kalshi_ws.unregister_bbo_callback(_on_bbo_change)
     except Exception:
         pass
+    if _wethr_socket_thread is not None:
+        _wethr_socket_thread.join(timeout=10)
     if _wethr_thread is not None:
         _wethr_thread.join(timeout=10)
     _started = False

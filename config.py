@@ -280,6 +280,32 @@ PRESCREEN = {
     # rule-violating). Total ~21 LLM-call savings vs prior flag alone.
     # Set False to fall back to skip_forecast_only_mu only.
     "skip_unless_nn_match": True,
+    # 2026-05-19: μ-margin filter. Block trades where the bot's projection
+    # sits inside (or too close to) the YES window. Defines confidence
+    # required to bet a given direction:
+    #   margin_outside_yes_f(μ, floor, cap, side) ≥ k_side · σ_chosen
+    # where margin is signed distance from μ to the nearest YES boundary,
+    # positive when μ supports the side direction.
+    #
+    # KXHIGHPHIL-26MAY18-B96.5 case (settled YES, BUY_NO −$3.85):
+    #   μ=96.3, σ=2.10, YES=[95.5, 97.5], side=BUY_NO
+    #   margin = -0.20  (μ INSIDE YES, ~0σ from edge)  ← would be filtered.
+    #
+    # Backtest n=28 settled BUYs (5/16-5/18, all pre-strip-forecasts):
+    #   baseline: 53.6% WR, -$44.60 net, -14.3% ROI
+    #   filter on (k_NO=1.5, k_YES=1.0, σ≤2.5): 6/6, +$16.88, +23% ROI
+    #   skip rate: 71-79% (volume drops sharply but expected ROI flips positive)
+    #
+    # Asymmetric: BUY_NO needs more margin (1.5σ) than BUY_YES (1.0σ) because
+    # BUY_YES naturally points at where μ projects, while BUY_NO bets against
+    # the bot's own projection direction.
+    "margin_filter_enabled": True,
+    "margin_k_sigma_buy_no":  1.5,   # BUY_NO requires μ ≥ 1.5σ outside YES
+    "margin_k_sigma_buy_yes": 1.0,   # BUY_YES requires μ ≥ 1.0σ outside YES
+    "margin_max_sigma_f":     2.5,   # extra gate: skip if σ > this (too wide)
+    # rm-lock OVERRIDES this filter (lock means physical settlement, math
+    # uncertainty no longer matters).
+    "margin_filter_bypass_when_rm_locked": True,
 }
 
 
@@ -437,6 +463,66 @@ OBS_ANCHORED_PRE_ENABLED: bool = False
 # settlement data is backfilled. Toggle off to disable the worker
 # entirely (callback unregisters, thread exits).
 SHADOW_NN_EVENT_DRIVEN: bool = True
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 2026-05-19: Push-based pure-code auto-execute architecture
+# ─────────────────────────────────────────────────────────────────────────────
+# Pure-nn decisions auto-executed via WS/socket push when:
+#   1. AUTO_EXECUTE_BUY_<NO|YES>_PUSH = True for the direction
+#   2. local_hour is within (peak/min ± offsets) for that station's empirical
+#      peak/min hour for the CURRENT MONTH (from pace_curves_*_v2.json)
+#   3. entry_price (cents) is in [PUSH_MIN_ENTRY_C, PUSH_MAX_ENTRY_C]
+#   4. position count for (station, series, direction) is below PUSH_MAX_TICKERS
+#
+# Direction toggles ON — pure-code architecture per Chris 2026-05-19.
+AUTO_EXECUTE_BUY_NO_PUSH: bool = True
+AUTO_EXECUTE_BUY_YES_PUSH: bool = True
+
+# Peak-relative window offsets (in hours). Window is open when:
+#   peak_hour - PUSH_PEAK_HOURS_BEFORE  <=  local_hour  <=  peak_hour + (HIGH|LOW after)
+PUSH_PEAK_HOURS_BEFORE: float = 1.0
+# 2026-05-19 push v2: asymmetric post-peak. LOW markets close shortly after the
+# daily LOW resolves, so post-peak BUYs hit the 30-min-to-close guardrail.
+# HIGH markets generally have more time. Per Chris: LOW after = 0.5h.
+PUSH_PEAK_HOURS_AFTER_HIGH: float = 0.5
+PUSH_PEAK_HOURS_AFTER_LOW: float = 0.5
+PUSH_PEAK_HOURS_AFTER: float = 0.5  # deprecated, kept for compat reads
+
+# Per-(station, series, month) override of the push decision window.
+# When True, nn_shadow_worker._in_decision_window consults
+# push_window_overrides.PUSH_WINDOW_OVERRIDES first; cells absent from the
+# dict fall back to PUSH_PEAK_HOURS_BEFORE / AFTER_<HIGH|LOW>. Map generated
+# from /home/ubuntu/data/phq_combined.csv (800-day backtest, 2026-05-19).
+USE_PUSH_WINDOW_OVERRIDES: bool = True
+
+# Entry-price guardrails (cents). Skip if the ask we'd pay is outside [floor, ceil].
+# Floor protects against long-shot bets; ceiling protects against settled markets.
+# 2026-05-19 v3: BUY_YES needs a higher floor than BUY_NO. Analysis of 170 shadow
+# decisions showed 0/12 settled wins on BUY_YES at <15c entry (n=52 cohort,
+# MTM −$0.13/$). Cheap YES = market consensus near-zero; nn overconfident on tails.
+PUSH_MIN_ENTRY_C: int = 10           # BUY_NO floor (unchanged)
+PUSH_MIN_ENTRY_C_BUY_YES: int = 25   # BUY_YES needs >= 25c (per Chris 2026-05-19)
+PUSH_MAX_ENTRY_C: int = 90
+
+# Max positions per (station, series, direction). 1 → at most one BUY_YES and
+# one BUY_NO ticker active per station per series at any time.
+PUSH_MAX_TICKERS_PER_STATION_SIDE_DIRECTION: int = 1
+
+# Pace-curve source files for empirical peak/min lookup
+PUSH_PACE_CURVES_HIGH_PATH: str = "/home/ubuntu/data/pace_curves_v2.json"
+PUSH_PACE_CURVES_LOW_PATH: str = "/home/ubuntu/data/pace_curves_low_v2.json"
+
+# LLM dispatch mode (paper_judge_bot 15-min cycle):
+#   "all"      — dispatch every survivor (legacy behavior)
+#   "yes_only" — only dispatch BUY_YES candidates (push handles BUY_NO)
+#   "off"      — disable LLM dispatch entirely (pure-code push-only)
+LLM_DISPATCH_MODE: str = "off"
+
+# NOTE: NN_LOW_GATE_UNLOCKED_POSTNOON stays True per its original setting
+# (post-noon unlocked LOW projections are unreliable per 2024-25 backtest).
+# Push windows for LOW are naturally bounded to morning + locked cohort by
+# the peak-relative window above.
 
 
 # ─────────────────────────────────────────────────────────────────────────────
