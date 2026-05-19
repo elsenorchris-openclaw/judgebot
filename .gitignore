@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+*.egg-info/
+.venv/
+venv/
+
+# Secrets (never commit)
+.env
+.env.local
+kalshi_key.pem
+*.pem
+.git-credentials
+
+# Bot runtime data (private, sometimes large)
+data/
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+
+# Backup files (we use lots of them but they don't belong in git)
+*.bak
+*.bak.*
+*.bak_*
+*.pre_*
+*.preanchored*
+pre_*.bak
+pre_drct_*
+pre_f1_*
+pre_f2_*
+pre_p0_*
+pre_sync_*
+pre_modified_*
+
+# macOS metadata
+.DS_Store
+._*
+
+# Logs / misc runtime
+*.log
+KILL
+nohup.out

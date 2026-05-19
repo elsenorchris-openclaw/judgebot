@@ -1,0 +1,28 @@
+[Unit]
+Description=paper_judge_bot — Claude-as-trader Kalshi weather bot
+After=network-online.target kalshi-s3-cache.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/paper_judge_bot
+EnvironmentFile=-/home/ubuntu/paper_judge_bot/.env
+ExecStart=/usr/bin/python3.12 /home/ubuntu/paper_judge_bot/paper_judge_bot.py
+Restart=on-failure
+RestartSec=15
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+# Stdout/stderr go to journal (journalctl -u paper-judge-bot)
+StandardOutput=journal
+StandardError=journal
+
+# Resource limits — these match the other 4 bots' defaults
+LimitNOFILE=4096
+MemoryHigh=400M
+MemoryMax=600M
+
+[Install]
+WantedBy=multi-user.target
