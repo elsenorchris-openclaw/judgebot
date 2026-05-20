@@ -4,6 +4,47 @@ A judgment-first Kalshi trading bot for daily weather markets. Claude is the
 entry+exit decision-maker; deterministic guardrails wrap the LLM so the
 worst-case blast radius is bounded by code, not by prompt quality.
 
+## Push window overrides: linear-interp endpoints — 2026-05-20 11:42 UTC
+
+Refinement of the 11:33 offset-derived overrides. Previously, the offset
+grid was 0.5h granular so endpoints like (4.0, -1.0) looked artificially
+integer-snapped. This commit applies linear interpolation between adjacent
+offset grid points to find:
+  - LATE end: exact offset where `settled_share` crosses 30%
+  - EARLY end: exact offset where `mae_pre_peak` crosses 1.3 × best_mae
+
+Endpoints are now genuinely fractional, e.g.:
+  ATL HIGH May:  (4.0, -1.0)   →  (4.0, -0.811)
+  ATL HIGH Feb:  (2.0, -0.5)   →  (1.884, -0.745)
+  ATL HIGH Apr:  (3.0, -0.5)   →  (2.659, -0.689)
+
+Many `before` values remain at grid boundary (e.g., 4.0 for HIGH) because
+the MAE curve doesn't cross the cap within the {-4.0, ..., +1.0} grid
+range — extending the grid would help but isn't done yet since stderr per
+cell (~0.05°F at n=432) is already at the data's resolution limit.
+
+Generator: `/home/ubuntu/tools/per_hour_quality/build_overrides_offset_interp.py`
+
+Coverage: 463/480 (was 462). 17 cells fall back to global.
+
+Live window verification (continuous endpoints):
+  ATL HIGH 2026-05-01: window [11.4, 14.6]  (peak 15.42)
+  ATL HIGH 2026-05-19: window [11.9, 15.1]  (peak 15.88)
+  ATL HIGH 2026-05-31: window [11.9, 15.1]  (peak 15.88)
+  ATL HIGH 2026-06-15: window [12.3, 14.5]  (June override, peak 15.30)
+
+May 19 replay: n=18, PnL +$3.22, ROI +3.8%.  (Slightly more permissive
+than non-interp version (n=12, +$5.65) because settled crossover at
+-0.811 instead of grid-snapped -1.0 admits the extra entries near peak.)
+
+Tests: 350 passed / 4 skipped / 1 pre-existing fail.
+
+Honest note on resolution: at n=432 per cell, MAE stderr is ~0.05°F.
+Adjacent 0.5h-grid MAE values often differ by less than that, so the
+"true" finer-than-0.5h endpoint estimate is mostly noise. Interpolation
+produces principled fractional values without claiming finer signal than
+the data supports.
+
 ## Push window overrides from FRACTIONAL OFFSET 5000-day backtest — 2026-05-20 11:33 UTC
 
 Re-ran the 5000-day MAE backtest, but binned by **fractional offset from
