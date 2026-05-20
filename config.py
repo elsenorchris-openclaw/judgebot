@@ -511,8 +511,8 @@ PUSH_MIN_EDGE_PP: int = 12
 # decisions showed 0/12 settled wins on BUY_YES at <15c entry (n=52 cohort,
 # MTM −$0.13/$). Cheap YES = market consensus near-zero; nn overconfident on tails.
 PUSH_MIN_ENTRY_C: int = 10           # BUY_NO floor (unchanged)
-PUSH_MIN_ENTRY_C_BUY_YES: int = 25   # BUY_YES needs >= 25c (per Chris 2026-05-19)
-PUSH_MAX_ENTRY_C: int = 90
+PUSH_MIN_ENTRY_C_BUY_YES: int = 30   # BUY_YES needs >= 30c (raised from 25 per 2026-05-20 sweep — filters cheap-YES lottery)
+PUSH_MAX_ENTRY_C: int = 80
 
 # Max positions per (station, series, direction). 1 → at most one BUY_YES and
 # one BUY_NO ticker active per station per series at any time.

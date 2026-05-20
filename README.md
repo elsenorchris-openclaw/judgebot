@@ -4,6 +4,36 @@ A judgment-first Kalshi trading bot for daily weather markets. Claude is the
 entry+exit decision-maker; deterministic guardrails wrap the LLM so the
 worst-case blast radius is bounded by code, not by prompt quality.
 
+## BUY_YES floor 25c→30c, max ask 90c→80c — 2026-05-20 06:26 UTC
+
+Two-knob defensive change after cross-session replay on May 19 candidates showed every config (current + all proposals tested) was losing on settled-only data. This is the LEAST-LOSING config of those tested — not expected to be profitable, just less unprofitable while the underlying signal layer (nn_match) is investigated for the recent hot-everywhere regime.
+
+  config.py
+    PUSH_MIN_ENTRY_C_BUY_YES:  25 -> 30
+    PUSH_MAX_ENTRY_C:          90 -> 80
+
+May 19 replay under corrected logic (retry-every-event dedup + integer peaks + settle-when-available + 24 settlements as of ship time):
+
+  config                              settled n   PnL       ROI
+  Current shipped (yes=25, max=90)      8 of 41   -$15.70   -59%
+  This tweak  (yes=30, max=80)          6 of 35   -$8.18    -43%   <-- shipped
+  Other configs tested                  6-12      -$18..-$37   -62..-96%
+
+Mechanism:
+- max_c=80 removes asymmetric high-price BUY_NO entries (82c+ has no spread-of-survival room on a reversal). Specific catch: KXLOWTMIA-B77.5 NO entry 82c -> settle 42c = -$2.40 on May 19.
+- yes_min=30 raises BUY_YES floor +5c. Filters two known marginal losers from May 19 (TLV-B82.5 @29c -$4.76, MIA-B88.5 @31c -$3.52) plus the cheap-YES lottery cohort more broadly.
+
+This is the proposal from a separate replay session. My own session's analysis reached a different conclusion which DID NOT survive when settled-only ground truth was used and when the integer-peak/retry-dedup logic was corrected. Both sessions had bugs; the conservative recommendation won.
+
+Caveat: signal-layer (nn_match mu accuracy) appears miscalibrated for the current regime. Filter tweaks rearrange losses but do not eliminate them. Pending diagnostic: per-station mu vs actual closing high on May 19, regime detection on hot-everywhere days, related to existing memory entries on sigma undercal and h2pk catastrophic at-peak.
+
+Files: config.py:514-515. Tests: 332 pass / 4 skip (unchanged).
+
+PID: 1232475 single+current. Verified via RULE #3c snippet immediately post-restart.
+
+Rollback: `cp config.py.pre_tinytweak_20260520_055500 config.py` and restart.
+
+
 ## Push edge_pp execution floor 6pp → 12pp — 2026-05-20 01:19 UTC
 
 `nn_shadow_worker._try_auto_execute` now refuses to fire when
