@@ -496,6 +496,18 @@ PUSH_PEAK_HOURS_AFTER: float = 0.5  # deprecated, kept for compat reads
 # from /home/ubuntu/data/phq_combined.csv (800-day backtest, 2026-05-19).
 USE_PUSH_WINDOW_OVERRIDES: bool = True
 
+# Fractional peak source for nn_shadow_worker._lookup_peak_hour.
+# When True, the decision-window check uses 5-year 10-day-rolling P50 of
+# day_max_lst_min / day_min_lst_min from heating_traces.sqlite (per K-station,
+# side, month-day). When False, falls back to int(empirical_peak_hour_local)
+# from pace_curves_v2.json (legacy behavior).
+# Validated 2026-05-20 on n=99,812 station-days: window hit-rate
+# 29.8% (int) → 38.0% (5yr-10day frac) HIGH; 29.3% → 36.9% LOW. May 19
+# replay PnL +$15.93 (frac) vs +$6.91 (int) under same overrides.
+# Source data: /home/ubuntu/data/peak_fractional_5yr_10day.json (14,610 cells).
+USE_FRACTIONAL_PEAK_FOR_WINDOW: bool = True
+PUSH_PEAK_FRACTIONAL_PATH: str = "/home/ubuntu/data/peak_fractional_5yr_10day.json"
+
 # Minimum edge_pp (percentage-points of P(direction) − market_implied) for
 # nn_shadow_strategy.pure_nn_decide to fire. Default in the function is 6pp;
 # we raise to 12pp based on 2026-05-20 backtest on n=196 trades (166 settled

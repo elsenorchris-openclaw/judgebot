@@ -161,8 +161,13 @@ def _signals_block(pkt: dict) -> dict:
 # ─────────────────────────────────────────────────────────────────────────────
 # Per-station peak/min hour lookup (production pace_curves)
 # ─────────────────────────────────────────────────────────────────────────────
-_peak_table_cache: dict = {}     # station(K-prefix) -> {month_int: peak_hour}
-_min_table_cache: dict = {}       # station(K-prefix) -> {month_int: min_hour}
+_peak_table_cache: dict = {}     # station(K-prefix) -> {month_int: peak_hour_int}
+_min_table_cache: dict = {}       # station(K-prefix) -> {month_int: min_hour_int}
+# 2026-05-20: fractional peak source (5yr 10-day rolling P50 from
+# heating_traces.sqlite). Loaded alongside int peaks; selected via
+# config.USE_FRACTIONAL_PEAK_FOR_WINDOW.
+_peak_table_frac_cache: dict = {}  # station(K-prefix) -> {"MM-DD": peak_hour_float}
+_min_table_frac_cache: dict = {}   # station(K-prefix) -> {"MM-DD": min_hour_float}
 _peak_table_loaded = False
 _peak_table_lock = threading.Lock()
 
@@ -234,6 +239,34 @@ def _ensure_peak_tables_loaded() -> None:
                         row[m_int] = int(mh)
                 if row:
                     _min_table_cache[st] = row
+            # 2026-05-20: also load fractional peak table (5yr 10-day rolling
+            # P50 from heating_traces). Falls back gracefully if file missing.
+            try:
+                frac_path = getattr(_cfg, "PUSH_PEAK_FRACTIONAL_PATH",
+                                    "/home/ubuntu/data/peak_fractional_5yr_10day.json")
+                with open(frac_path) as f:
+                    frac_data = json.load(f).get("peaks", {})
+                n_h, n_l = 0, 0
+                for k, v in frac_data.items():
+                    parts = k.split("|")
+                    if len(parts) != 3: continue
+                    K_st, side, md = parts
+                    try: fv = float(v)
+                    except (TypeError, ValueError): continue
+                    if side == "HIGH":
+                        _peak_table_frac_cache.setdefault(K_st, {})[md] = fv
+                        n_h += 1
+                    elif side == "LOW":
+                        _min_table_frac_cache.setdefault(K_st, {})[md] = fv
+                        n_l += 1
+                log.info("fractional peak table loaded: HIGH=%d cells across %d stations, "
+                         "LOW=%d cells across %d stations",
+                         n_h, len(_peak_table_frac_cache),
+                         n_l, len(_min_table_frac_cache))
+            except FileNotFoundError:
+                log.warning("fractional peak table not found, falling back to int")
+            except Exception as e:
+                log.exception("failed to load fractional peak table: %s", e)
             _peak_table_loaded = True
             log.info("peak/min hour tables loaded: HIGH=%d stations LOW=%d stations",
                      len(_peak_table_cache), len(_min_table_cache))
@@ -241,14 +274,40 @@ def _ensure_peak_tables_loaded() -> None:
             log.exception("failed to load pace_curves: %s", e)
 
 
-def _lookup_peak_hour(station: str, series: str, climate_day: str) -> Optional[int]:
-    """Return empirical peak/min hour LST for (station, series, climate-month).
-    series ∈ {'HIGH','LOW'}. Returns None on lookup failure."""
+def _lookup_peak_hour(station: str, series: str, climate_day: str) -> Optional[float]:
+    """Return empirical peak/min hour LST for (station, series, climate-day).
+
+    series ∈ {'HIGH','LOW'}. Returns None on lookup failure.
+
+    If config.USE_FRACTIONAL_PEAK_FOR_WINDOW is True, returns the 5yr 10-day
+    rolling fractional P50 from heating_traces (e.g., 15.62). Otherwise
+    returns the legacy int from pace_curves (e.g., 15). On fractional miss
+    (e.g., no data for this specific (station, side, mm-dd)), falls back
+    to the int value to preserve old behavior.
+    """
     _ensure_peak_tables_loaded()
     try:
-        month = int(climate_day.split("-")[1])
+        parts = climate_day.split("-")
+        month = int(parts[1])
+        day = int(parts[2])
+        md_key = f"{month:02d}-{day:02d}"
     except Exception:
         return None
+
+    # Try fractional first when flag is on
+    try:
+        import config as _cfg
+        if getattr(_cfg, "USE_FRACTIONAL_PEAK_FOR_WINDOW", False):
+            frac_table = (_peak_table_frac_cache if series == "HIGH"
+                          else _min_table_frac_cache)
+            frac_row = frac_table.get(station) or {}
+            frac_val = frac_row.get(md_key)
+            if frac_val is not None:
+                return frac_val
+    except Exception:
+        pass
+
+    # Fallback to int (legacy)
     table = _peak_table_cache if series == "HIGH" else _min_table_cache
     row = table.get(station) or {}
     return row.get(month)

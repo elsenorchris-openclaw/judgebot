@@ -4,6 +4,56 @@ A judgment-first Kalshi trading bot for daily weather markets. Claude is the
 entry+exit decision-maker; deterministic guardrails wrap the LLM so the
 worst-case blast radius is bounded by code, not by prompt quality.
 
+## Fractional peak source (5yr 10-day rolling) — 2026-05-20 06:51 UTC
+
+`nn_shadow_worker._lookup_peak_hour` now returns the 5-year 10-day-rolling
+P50 of `day_max_lst_min` / `day_min_lst_min` from heating_traces.sqlite
+(per K-station, side, month-day), instead of `int(empirical_peak_hour_local)`
+from pace_curves_v2.json.
+
+Source data: `/home/ubuntu/data/peak_fractional_5yr_10day.json` — 14,610
+cells (20 stations × 2 sides × 366 days, minus 30 cells with <10 samples).
+Window per cell: ±5 days × last 5 years. Generator:
+`/home/ubuntu/tools/per_hour_quality/build_peak_frac.py`.
+
+Validated on n=99,812 historical station-days (window-hit-rate = % of days
+where the bot's decision window actually contains the day's true peak time):
+
+  HIGH:  int 29.8% → frac 38.0%   (+8.2pp, +27% relative)
+  LOW:   int 29.3% → frac 36.9%   (+7.6pp, +26% relative)
+
+Replay PnL on yesterday's May 19 candidates (n=15 fills under frac vs
+n=19 under int, using current overrides):
+
+  int peak  + current overrides:  PnL=+$6.91   ROI=+7.6%
+  frac peak + current overrides:  PnL=+$15.93  ROI=+22.5%   ← shipped
+
+Mechanism: per-(station, side, month) overrides were generated against
+integer peak. Switching the peak source shifts every effective window
+LATER by 0-1h (the int-vs-frac delta). This drops the "way before peak"
+early entries, which is where most boundary-noise BUY_YES losers sat.
+
+Implementation:
+  config.py adds
+    USE_FRACTIONAL_PEAK_FOR_WINDOW: bool = True
+    PUSH_PEAK_FRACTIONAL_PATH: str = "/home/ubuntu/data/peak_fractional_5yr_10day.json"
+  nn_shadow_worker.py:
+    _peak_table_frac_cache, _min_table_frac_cache loaded by
+    _ensure_peak_tables_loaded(). _lookup_peak_hour() returns frac when
+    flag is on AND cell exists, else falls back to int (legacy).
+
+Override values were NOT regenerated. Doing so would re-align windows to
+the same LST hours and reverse the gain — the win is precisely from the
+window-shift-later effect.
+
+Tests: 350 passed / 4 skipped / 1 pre-existing fail.
+
+Rollback: set USE_FRACTIONAL_PEAK_FOR_WINDOW=False in config.py + restart,
+or restore from .pre_frac_peak_20260520 backups.
+
+Caveat: KNYC HIGH is the only station with negative window hit-rate lift
+(-1.2pp). Single-station noise on n=1; not worth a per-station veto.
+
 ## BUY_YES floor 25c→30c, max ask 90c→80c — 2026-05-20 06:26 UTC
 
 Two-knob defensive change after cross-session replay on May 19 candidates showed every config (current + all proposals tested) was losing on settled-only data. This is the LEAST-LOSING config of those tested — not expected to be profitable, just less unprofitable while the underlying signal layer (nn_match) is investigated for the recent hot-everywhere regime.
