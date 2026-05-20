@@ -94,19 +94,24 @@ fallback set: 84 out-of-bounds (matcher's tight_win lands too far from
 peak — single-hour artifact in low-N data) and 2 have no qualifying window
 (KDCA LOW Feb, KDEN LOW May — overnight ASOS gaps).
 
-Coverage source: 800 most-recent station-days per station (~25 months of
-data). Full 5000-day backtest in progress at
-`/home/ubuntu/data/per_hour_quality_full/`; when complete, regenerate via
-`build_overrides.py > push_window_overrides.py` and restart.
+Coverage source: 5000 most-recent station-days per station (~13 years).
+Regenerated 2026-05-20 00:34 UTC after the full sweep at
+`/home/ubuntu/data/per_hour_quality_full/`. Coverage went from 394/480
+(800-day) to 424/480 (5000-day) = 88%. The 800-day override is preserved
+at `push_window_overrides.py.800day` for diff; the active map is
+`push_window_overrides.py`. To regen from new data: re-run
+`aggregate_phq.py` then `build_overrides.py > push_window_overrides.py`
+and restart.
 
-Verification (post-restart 19:43:33 UTC, PID 56290):
+Verification (post-restart 2026-05-20 00:34 UTC, PID 627424):
   ATL HIGH May 14:00 LST -> src=override window=[13.0,15.0] (inside) ✓
-  ATL HIGH May 15:30 LST -> src=override (outside; global would have allowed) ✓
-  KDEN LOW May 04:30 LST -> src=global window=[3.9,5.4] (fallback) ✓
+  ATL HIGH May 15:30 LST -> src=override (outside) ✓
+  KDEN LOW May was 800-day fallback, now has override (3.93, -0.93) ✓
 
-Tests: 350 passed (was 344, +6 new TestPushWindowOverrides) / 4 skipped / 1
-pre-existing fail (test_truncation_reduces_buy_no_edge_when_rm_in_yes,
-unrelated).
+Tests: 350 passed (was 344, +6 TestPushWindowOverrides; 2 of those 6
+rewritten to monkey-patch PUSH_WINDOW_OVERRIDES so they're robust to
+future dict regens) / 4 skipped / 1 pre-existing fail
+(test_truncation_reduces_buy_no_edge_when_rm_in_yes, unrelated).
 
 Rollback:
   Set USE_PUSH_WINDOW_OVERRIDES=False in config.py + restart, or
