@@ -526,6 +526,32 @@ PUSH_MIN_ENTRY_C: int = 10           # BUY_NO floor (unchanged)
 PUSH_MIN_ENTRY_C_BUY_YES: int = 30   # BUY_YES needs >= 30c (raised from 25 per 2026-05-20 sweep — filters cheap-YES lottery)
 PUSH_MAX_ENTRY_C: int = 80
 
+# Tier 1 runtime gates — physics-catastrophic conditions where the nn matcher
+# (trained on normal-weather days) literally cannot work. Conservative
+# thresholds catch only the extreme tail. No backtest required because the
+# mechanism is obvious (fog kills the diurnal cycle, extreme wind = tropical /
+# severe regime — both are <1% of station-days and reliably reported by the
+# wethr feed). Visibility also serves as a precipitation proxy: heavy rain/snow
+# almost always drops vsby below 1 mi. A real precip-rate gate is a follow-up
+# (wethr cache doesn't currently emit precip_in_h). Set to 999 / -1 to disable.
+PUSH_MIN_VSBY_MI: float = 0.5              # visibility < 0.5 mi (dense fog / heavy precip) → skip
+PUSH_MAX_WIND_MPH: float = 40.0            # sustained wind or gust > 40 mph (~35 kt) → skip
+
+# 2026-05-20: F1 rm-staleness validation for push pure-nn worker.
+# Bug discovered today: nn_shadow_worker bypassed wethr_rm.validate_rm_for_climate_day,
+# leaving the push path vulnerable to using yesterday-evening rm readings as todays
+# anchor. KAUS LOW 5/20 entered BUY_NO at B67.5 rm-locked on a 66°F reading from
+# 5/19 21:08 CDT (still 5/19 LST climate day); actual 5/20 min was 68°F → loss.
+# Kalshi confirms LST climate-day boundary via market close_time field (verified by
+# API: KXLOWTAUS-26MAY20 close_time=2026-05-21T06:00Z = LST midnight ending 5/20).
+# Set to False to instantly revert to legacy behavior (uses any rm whatever its date).
+PUSH_VALIDATE_RM_CLIMATE_DAY: bool = True
+# Grace period (seconds) after LST midnight before treating rm as predictive. LOW gets
+# 15min (rapid pre-dawn cooling already informative); HIGH gets 60min (longer warmup).
+# Matches paper_judge_bot.py:449,757 existing pattern.
+PUSH_RM_GRACE_SEC_LOW: float = 900.0
+PUSH_RM_GRACE_SEC_HIGH: float = 3600.0
+
 # Max positions per (station, series, direction). 1 → at most one BUY_YES and
 # one BUY_NO ticker active per station per series at any time.
 PUSH_MAX_TICKERS_PER_STATION_SIDE_DIRECTION: int = 1

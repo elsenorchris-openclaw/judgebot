@@ -418,6 +418,30 @@ def _try_auto_execute(cand, packet: dict, decision: dict,
         return False, f"outside_window {cand.station}/{series}/{short_dir}: {win_dbg}"
     if _rt is None:
         return False, "rt_not_initialized"
+    # (2b) Tier 1 runtime gates — physics-catastrophic regimes the matcher
+    # cannot represent (dense fog / heavy precip kill the diurnal cycle;
+    # extreme wind = tropical or severe storm). Thresholds in config.
+    # Visibility doubles as a precip proxy (no precip_in_h field in wethr yet).
+    wo = packet.get("wethr_obs") or {}
+    min_vsby = float(getattr(_cfg, "PUSH_MIN_VSBY_MI", 0.5))
+    if min_vsby > 0:
+        vsby = wo.get("visibility_miles")
+        if vsby is None:
+            vsby = wo.get("visibility")
+        try:
+            if vsby is not None and float(vsby) < min_vsby:
+                return False, f"tier1_vsby {float(vsby):.2f}mi < {min_vsby}mi"
+        except (TypeError, ValueError):
+            pass
+    max_wind = float(getattr(_cfg, "PUSH_MAX_WIND_MPH", 40.0))
+    if max_wind > 0:
+        for fld in ("wind_speed_mph", "wind_gust_mph"):
+            v = wo.get(fld)
+            try:
+                if v is not None and float(v) > max_wind:
+                    return False, f"tier1_wind {fld}={float(v):.1f}mph > {max_wind}mph"
+            except (TypeError, ValueError):
+                pass
     # (3) Price floor/ceiling — entry must be in [min_c, max_c]
     # 2026-05-19 v3: BUY_YES gets a higher floor (cheap-YES lottery trap).
     max_c = int(getattr(_cfg, "PUSH_MAX_ENTRY_C", 90))

@@ -4,6 +4,56 @@ A judgment-first Kalshi trading bot for daily weather markets. Claude is the
 entry+exit decision-maker; deterministic guardrails wrap the LLM so the
 worst-case blast radius is bounded by code, not by prompt quality.
 
+## Tier 1 push-buy runtime gates (vsby + wind) — 2026-05-20 20:09 UTC
+
+The pure-nn push path now skips buys when wethr_obs reports a
+physics-catastrophic regime the nn matcher was never trained to represent.
+This protects the matcher from being asked to predict during dense fog /
+heavy precipitation (diurnal cycle suppressed) or extreme wind
+(tropical / severe storm regime).
+
+**Gates** (both in `nn_shadow_worker._try_auto_execute`, fire after the
+push decision-window check and before price-floor):
+
+- `tier1_vsby`: `wethr_obs.visibility_miles < PUSH_MIN_VSBY_MI` (default 0.5
+  mi). Falls back to `wethr_obs.visibility` if `visibility_miles` is absent.
+  Visibility doubles as a precipitation proxy — heavy rain/snow reliably
+  drops vsby below 1 mi. A real precip-rate gate is a follow-up (the
+  wethr cache doesn't currently emit a precip_in_h field; once it does,
+  we'll add `PUSH_MAX_ACTIVE_PRECIP_INH`).
+- `tier1_wind`: `wind_speed_mph > PUSH_MAX_WIND_MPH` OR
+  `wind_gust_mph > PUSH_MAX_WIND_MPH` (default 40 mph ≈ 35 kt). Sustained
+  winds at that level are tropical storm / severe-thunderstorm regimes
+  that mix the boundary layer aggressively and decorrelate from any
+  diurnal-shape analog the matcher could find.
+
+**Why no backtest required:** these are physics-obvious, low-firing-rate
+gates. Dense fog and 40+ mph winds are <1% of station-days. The mechanism
+is structural, not statistical (no nn-trained analog days exist for these
+regimes, so any prediction is implicit extrapolation). Threshold tuning
+won't move them onto the wrong side — 0.5 mi vs 1.0 mi vsby doesn't change
+the qualitative call.
+
+**Disable knob:** set either threshold to `0` (or negative) in `config.py`
+to bypass the corresponding gate. Removing the gate without rollback is a
+one-line config edit + restart.
+
+**Files:**
+- `config.py` — adds `PUSH_MIN_VSBY_MI = 0.5`, `PUSH_MAX_WIND_MPH = 40.0`.
+- `nn_shadow_worker.py` — new gate-2b block in `_try_auto_execute` reading
+  `packet["wethr_obs"]`.
+- `tests/test_push_tier1_gates.py` — 9 new tests pinning gate behavior
+  (below/above threshold, fallback field, missing field fails open,
+  zero-threshold disables, sustained vs gust trigger paths).
+
+Full suite: 345 passed / 4 skipped (was 336/4 — +9 from new tests).
+
+**Open follow-up (Tier 2):** sigma_natural and forecast-disagreement gates
+require backtest validation before ship.
+
+**Backups:** `config.py.pre_tier1_gates_20260520`,
+`nn_shadow_worker.py.pre_tier1_gates_20260520`.
+
 ## Position cap scoped to candidate.climate_day — 2026-05-20 19:30 UTC
 
 Bug fix. The per-(station, series_prefix, direction) position cap in
@@ -52,6 +102,55 @@ Full suite: 336 passed / 4 skipped (was 332/4 — added 4 new, no regressions).
   doesn't affect settlement — it just stops them from blocking new BUYs
   during the wait.
 - Backup file: `nn_shadow_worker.py.pre_climateday_poscap_20260520`.
+
+## WS drift guard — block inverted BBO at write+read — 2026-05-20 19:32 UTC
+
+`kalshi_ws` was caching inverted BBO state (yes_bid + no_bid > 100 → impossible
+arb) during transient races between Kalshi's delta updates. nn_shadow_worker's
+packet builder calls `kalshi_ws.get_bbo()`, so pure-nn was firing phantom-edge
+BUY signals on ~6.1% of evaluations today (3,958 of 65,237). Scout's REST
+fallback caught most at execution time ("no level passed edge gate") but the
+signal layer was still wasting CPU + Discord alerts on cases that could never
+fill.
+
+**Root cause.** Kalshi WS sends one delta per book update. When matched orders
+are removed, two deltas arrive sequentially. Between them, `_recompute_bbo`
+sees only one side removed → inverted cache. Existing drift detection scheduled
+a resync but still wrote the bad BBO into the cache. 30s per-ticker rate limit
+made recovery slow.
+
+**Source-adjacent fix — refuse to publish intermediate state.** Three coordinated
+changes in `kalshi_ws.py`:
+
+1. `_recompute_bbo`: drift check moved before cache write; on inversion, skip
+   `_bbo_cache[ticker] = new_bbo` AND suppress BBO callback. Consumers keep
+   seeing last known-good BBO. Counter `cache_writes_skipped_inverted`.
+2. `get_bbo`: defensive read-side re-check; returns None if cache somehow holds
+   inverted state. Counter `bbo_reads_blocked_inverted`. Caller falls back to
+   REST (already-existing path).
+3. `_RESYNC_PER_TICKER_RATE_SEC` 30.0 → 5.0. Drift recovery window shrinks from
+   up to 30s to up to 5s. Max ~46 resyncs/sec at 230 tickers — well under
+   Kalshi rate limits.
+
+Plus stats formatter extended to include `cache_skip_inv` and `read_block_inv`
+on the periodic log line.
+
+**Note: scout/execute_buy WS-first orderbook (Item 3 of the fast/safe plan)
+was already shipped 2026-05-16** — `kalshi_ws.get_orderbook` already rejects
+inverted state. This ship closes the same gap on the BBO path used by the
+signal layer.
+
+**Module flag for instant rollback:** `_INVERSION_GUARD_ENABLED = True` at top
+of `kalshi_ws.py`. Set False + restart to revert.
+
+**Live verification (4 min post-restart):**
+- `inv=112` (drift detections), `cache_skip_inv=112` (100% blocked, perfect 1:1)
+- `read_block_inv=1` (read-side caught a startup-state case)
+- Shadow evals since restart: 212 packets, **0 arb-stale (0.0%)** vs **6.1% baseline**
+- `resync_drift=56`, `resync_sent=3`, `resync_rl=56` (rate-limit working at 5s)
+
+**Files shipped.** kalshi_ws.py (3 logic edits + 2 stat counters + log-formatter
+extension). Tests 336 passed / 4 skipped. Backup `kalshi_ws.py.pre_drift_guard_20260520`.
 
 ## Scout label: claude_read → nn_read (push pure-nn path) — 2026-05-20 18:00 UTC
 
