@@ -4,6 +4,52 @@ A judgment-first Kalshi trading bot for daily weather markets. Claude is the
 entry+exit decision-maker; deterministic guardrails wrap the LLM so the
 worst-case blast radius is bounded by code, not by prompt quality.
 
+## Push window overrides regenerated frac-aligned — 2026-05-20 07:00 UTC
+
+Follow-up to the fractional peak source ship 09 min earlier. Overrides were
+previously generated against integer peak; with the bot now using fractional
+peak, the effective LST windows had drifted ~0.5h later than the MAE-derived
+data hours. This regen anchors override values to the fractional peak so the
+effective LST windows match the data-derived hours exactly.
+
+Generator: `/home/ubuntu/tools/per_hour_quality/build_overrides_frac.py`
+Reference peak per (K-station, side, month) = `peak_fractional_5yr_10day.json`
+at month-midpoint (day 15). Quality bounds widened proportional to the int-
+vs-frac delta:
+  HIGH: before [0.0, 5.5]  after [-3.0, 1.5]   (was 4.5 / [-2.0, 1.5])
+  LOW:  before [0.0, 7.0]  after [-3.0, 1.0]   (was 5.5 / [-2.5, 1.0])
+
+Coverage: 460/480 cells (was 470 under int alignment). 10 fewer cells admit
+overrides; those fall back to the global window.
+
+What changed in practice:
+  ATL HIGH May before  2.0 → 2.867  (the +0.867 = int-vs-frac peak delta)
+  ATL HIGH May after   0.0 → -0.867
+  Effective window     [13.0, 15.0] LST — UNCHANGED at month midpoint
+
+Day-by-day drift now captured. Same ATL HIGH May override (2.867, -0.867):
+  May 1  + frac peak 15.42  → window [12.6, 14.6]
+  May 19 + frac peak 15.88  → window [13.0, 15.0]
+  May 31 + frac peak 15.95  → window [13.1, 15.1]
+
+Month-boundary rollover verified live:
+  ATL HIGH 2026-05-19 → src=override window=[13.0,15.0] (May override picks up)
+  ATL HIGH 2026-06-15 → src=override window=[13.0,15.0] (June override picks up, no restart)
+
+May 19 sim PnL re-checked under the regen: $+6.91 ROI +7.6% (n=19).
+Same as the pre-frac-peak baseline. The +$9 gain that came from running
+int-aligned overrides through the new frac peak source was an accidental
+window-shift-later effect; this regen reverts that for methodological
+consistency. The +$9 sample was n=15 on a single day (regime-mismatch day
+that lost -$34 in real settled outcomes anyway) — not strong evidence.
+
+Tests: 350 passed / 4 skipped / 1 pre-existing fail. Tests updated to
+mock frac peak and assert window ranges rather than hardcoded values.
+
+Rollback: `cp push_window_overrides.py.pre_fracalign_20260520 push_window_overrides.py`
+and restart. Or set `USE_FRACTIONAL_PEAK_FOR_WINDOW=False` to revert to the
+int peak source AND int-aligned overrides simultaneously.
+
 ## Fractional peak source (5yr 10-day rolling) — 2026-05-20 06:51 UTC
 
 `nn_shadow_worker._lookup_peak_hour` now returns the 5-year 10-day-rolling
