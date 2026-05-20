@@ -496,6 +496,15 @@ PUSH_PEAK_HOURS_AFTER: float = 0.5  # deprecated, kept for compat reads
 # from /home/ubuntu/data/phq_combined.csv (800-day backtest, 2026-05-19).
 USE_PUSH_WINDOW_OVERRIDES: bool = True
 
+# Minimum edge_pp (percentage-points of P(direction) − market_implied) for
+# nn_shadow_strategy.pure_nn_decide to fire. Default in the function is 6pp;
+# we raise to 12pp based on 2026-05-20 backtest on n=196 trades (166 settled
+# + 30 today as proxy via current bid). Edge floor sweep was monotonic on
+# pure-nn cohort: 6→12pp lifts ROI from −0.0% → +0.8%; 6→15pp to +3.3%;
+# 6→20pp to +6.0%. 12pp chosen as conservative move that preserves 70% of
+# volume while filtering bottom-edge marginal trades.
+PUSH_MIN_EDGE_PP: int = 12
+
 # Entry-price guardrails (cents). Skip if the ask we'd pay is outside [floor, ceil].
 # Floor protects against long-shot bets; ceiling protects against settled markets.
 # 2026-05-19 v3: BUY_YES needs a higher floor than BUY_NO. Analysis of 170 shadow

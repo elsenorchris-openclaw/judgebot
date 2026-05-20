@@ -319,15 +319,17 @@ def _try_auto_execute(cand, packet: dict, decision: dict,
 
     Returns (executed, reason). Safety checks (push pure-code arch 2026-05-19):
       1. Direction-specific toggle ON (AUTO_EXECUTE_BUY_<NO|YES>_PUSH)
-      2. (station, series, hour) inside [peak-PUSH_PEAK_HOURS_BEFORE,
+      2. decision.edge >= PUSH_MIN_EDGE_PP/100 (raised from pure_nn_decide's
+         shadow-log floor of 6pp to filter marginal-edge bottom-tail trades).
+      3. (station, series, hour) inside [peak-PUSH_PEAK_HOURS_BEFORE,
          peak+PUSH_PEAK_HOURS_AFTER] using empirical per-(station, month)
          peak/min hour from pace_curves.
-      3. Entry ask is within [PUSH_MIN_ENTRY_C, PUSH_MAX_ENTRY_C].
-      4. No existing position on this exact ticker.
-      5. Open position count for (station, series_prefix, direction)
+      4. Entry ask is within [PUSH_MIN_ENTRY_C, PUSH_MAX_ENTRY_C].
+      5. No existing position on this exact ticker.
+      6. Open position count for (station, series_prefix, direction)
          below PUSH_MAX_TICKERS_PER_STATION_SIDE_DIRECTION.
-      6. Wallet has cash for min_buy.
-      7. Series correlation cap not exceeded.
+      7. Wallet has cash for min_buy.
+      8. Series correlation cap not exceeded.
 
     Reuses paper_judge_bot.execute_buy() so all the freshness/drift/dust
     safeguards apply identically to LLM-driven trades.
@@ -337,6 +339,15 @@ def _try_auto_execute(cand, packet: dict, decision: dict,
     if direction not in ("BUY_NO", "BUY_YES"):
         return False, "not_a_buy"
     short_dir = "NO" if direction == "BUY_NO" else "YES"
+    # (Gate 2) Edge floor — bot only fires above PUSH_MIN_EDGE_PP. The
+    # nn_shadow_strategy.pure_nn_decide internal floor stays at 6pp so the
+    # shadow log keeps logging marginal-edge candidates for diagnostics.
+    min_edge_pp = int(getattr(_cfg, "PUSH_MIN_EDGE_PP", 12))
+    edge_val = decision.get("edge")
+    if edge_val is None:
+        return False, "no_edge"
+    if (edge_val * 100.0) < min_edge_pp:
+        return False, f"edge_below_floor {edge_val*100:.1f}pp < {min_edge_pp}pp"
     toggle_attr = f"AUTO_EXECUTE_BUY_{short_dir}_PUSH"
     if not getattr(_cfg, toggle_attr, False):
         return False, f"{toggle_attr}=False"

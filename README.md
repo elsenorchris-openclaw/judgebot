@@ -4,6 +4,36 @@ A judgment-first Kalshi trading bot for daily weather markets. Claude is the
 entry+exit decision-maker; deterministic guardrails wrap the LLM so the
 worst-case blast radius is bounded by code, not by prompt quality.
 
+## Push edge_pp execution floor 6pp → 12pp — 2026-05-20 01:19 UTC
+
+`nn_shadow_worker._try_auto_execute` now refuses to fire when
+`decision.edge * 100 < PUSH_MIN_EDGE_PP` (default 12). `pure_nn_decide`'s
+internal floor stays at 6pp so the shadow log keeps capturing 6-12pp
+candidates for post-hoc analysis.
+
+Backtest n=196 (166 settled May 14-19 LLM-mode + 30 pure-nn from 2026-05-19
+treated as proxy-settled via current bid):
+
+  edge_pp >=  6pp   (current)  n=24 wr=20.8%  ROI= -0.0%   pure-nn cohort
+  edge_pp >= 12pp              n=21 wr=19.0%  ROI= +0.8%
+  edge_pp >= 15pp              n=18 wr=22.2%  ROI= +3.3%
+  edge_pp >= 20pp              n=15 wr=26.7%  ROI= +6.0%
+
+Sweep is monotonic (every threshold improves vs prior). 12pp picked as
+conservative move that preserves ~70% of volume. The yesterday-was-bad
+margin_sig filter idea was REJECTED — non-monotonic across thresholds
+(>=0.25 ROI +5.8% on HIGH-only, >=0.50 collapses to -55.1%), classic
+sample-noise signature. Halving the override windows was also REJECTED —
+it rejects 29 of 30 yesterday's entries (effectively turns the bot off).
+
+Files: config.py adds `PUSH_MIN_EDGE_PP: int = 12`. nn_shadow_worker.py
+adds gate-2 in `_try_auto_execute` (returns "edge_below_floor Xpp < 12pp").
+
+Tests: 350 passed / 4 skipped / 1 pre-existing fail (unchanged).
+
+Rollback: set `PUSH_MIN_EDGE_PP = 6` in config.py and restart, or
+`cp config.py.pre_edge_floor_20260520 config.py` and same for nn_shadow_worker.py.
+
 
 ## Push pure-code entry window tightened — 2026-05-19 18:58 UTC
 
