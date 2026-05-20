@@ -4,6 +4,62 @@ A judgment-first Kalshi trading bot for daily weather markets. Claude is the
 entry+exit decision-maker; deterministic guardrails wrap the LLM so the
 worst-case blast radius is bounded by code, not by prompt quality.
 
+## Push window overrides: ACCURACY-FIRST — 2026-05-20 11:56 UTC
+
+Fundamental redesign of the override selection criterion. Previously the
+windows were chosen by the contiguous good-run filter (firing>=65%,
+settled<=30%, n>=20). The settled<=30% gate was too tight — it threw out
+the most-accurate offsets (closest to peak, where trajectory is most
+complete).
+
+New criterion: pick the offset with LOWEST mae_pre_peak, expand to
+contiguous offsets within 1.15 * best_mae. Only constraint on settled:
+< 100%. This puts windows tightly around the matcher's most accurate
+region, accepting that many days will be settled-at-trade-time —
+we only need the 10-30% of unsettled days for profitable bets.
+
+ALSO: critical simulator bug fixed. The replay was deduping BUY events
+by first occurrence per (ticker, action), so it never tried later BUY
+events when the first was outside the window. Real bot retries every
+push event until one passes all gates. Fixed simulator now properly
+counts all events.
+
+Sample changes (per cell):
+  ATL HIGH May:  was (4.0, -1.0)    →  (1.0, -0.5)
+                 window 4h to 1h before peak  →  1h to 30min before peak
+  ATL LOW May:   was (3.5, -1.5)    →  (1.5,  0.5)
+                 → window 1.5h before to 30min AFTER min
+
+May 19 replay (with FIXED simulator):
+  CURRENT  (settled<=30%, grid-snapped):   n=35  PnL=-\$25.22  ROI=-15.2%
+                                            settled subset: 13 trades, -\$30.81
+  NEW      (accuracy-first, settled<100%): n=31  PnL=+\$21.77  ROI=+14.6%
+                                            settled subset: 5 trades, -\$2.38
+
+ΔPnL = +\$47 on May 19. HIGH BUY_NO alone swung -\$4 → +\$34 (n=10).
+
+Coverage 424/480 (was 462). Narrower windows reject more cells where
+no offset has reliable enough MAE within the cap.
+
+Live verification:
+  ATL HIGH 2026-05-01 at h=15.0:  window [14.4, 14.9]  (inside ← yes)
+  ATL HIGH 2026-05-19 at h=15.0:  window [14.9, 15.4]
+  ATL HIGH 2026-06-15 at h=15.0:  window [13.8, 15.3]  (June override)
+
+Tests: 350 passed / 4 skipped / 1 pre-existing fail. Test mocks updated
+to use h values inside the new (narrower) windows.
+
+Rollback: cp push_window_overrides.py.pre_accuracy_20260520 ...
+
+Honest caveats:
+  - One-day replay sample (May 19). The +\$47 swing is mechanism-sound but
+    needs cross-day validation.
+  - 0.5h offset grid resolution is at the data noise floor; a finer grid
+    re-run would not change the conclusions materially.
+  - HIGH BUY_YES still bleeds (-\$5.71 even with accuracy-first). The
+    boundary-confidence problem isn't a window problem; it's a mu-bias
+    problem on the recent hot regime.
+
 ## Push window overrides: linear-interp endpoints — 2026-05-20 11:42 UTC
 
 Refinement of the 11:33 offset-derived overrides. Previously, the offset

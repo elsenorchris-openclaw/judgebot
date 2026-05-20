@@ -36,7 +36,7 @@ class TestPushWindowOverrides(unittest.TestCase):
             import importlib
             cfg = importlib.import_module("config")
             with mock.patch.object(cfg, "USE_PUSH_WINDOW_OVERRIDES", True):
-                ok, dbg = nsw._in_decision_window("KATL", "HIGH", 14.0,
+                ok, dbg = nsw._in_decision_window("KATL", "HIGH", 15.2,
                                                   "2026-05-19")
         self.assertTrue(ok, dbg)
         self.assertIn("src=override", dbg)
@@ -44,7 +44,7 @@ class TestPushWindowOverrides(unittest.TestCase):
         m = re.search(r"window=\[(-?[\d.]+),(-?[\d.]+)\]", dbg)
         self.assertIsNotNone(m)
         lo, hi = float(m.group(1)), float(m.group(2))
-        self.assertTrue(lo <= 14.0 <= hi, dbg)
+        self.assertTrue(lo <= 15.2 <= hi, dbg)
         # Sanity: window width 1-4h, opens within 3.5h before peak
         self.assertTrue(0.5 <= hi - lo <= 4.5, f"width {hi-lo}: {dbg}")
         self.assertTrue(11.0 <= lo <= 16.0, f"lo {lo}: {dbg}")
@@ -67,7 +67,7 @@ class TestPushWindowOverrides(unittest.TestCase):
             import importlib
             cfg = importlib.import_module("config")
             with mock.patch.object(cfg, "USE_PUSH_WINDOW_OVERRIDES", False):
-                ok, dbg = nsw._in_decision_window("KATL", "HIGH", 14.0,
+                ok, dbg = nsw._in_decision_window("KATL", "HIGH", 13.5,
                                                   "2026-05-19")
         # 14.0 < 14.883 → outside global window
         self.assertFalse(ok, dbg)
@@ -96,13 +96,13 @@ class TestPushWindowOverrides(unittest.TestCase):
             import importlib
             cfg = importlib.import_module("config")
             with mock.patch.object(cfg, "USE_PUSH_WINDOW_OVERRIDES", True):
-                ok, dbg = nsw._in_decision_window("KATL", "HIGH", 13.0,
+                ok, dbg = nsw._in_decision_window("KATL", "HIGH", 14.0,
                                                   "2026-01-15")
         self.assertIn("src=override", dbg)
         # 13.0 should be in the ATL HIGH Jan window (range check)
         m = re.search(r"window=\[(-?[\d.]+),(-?[\d.]+)\]", dbg)
         lo, hi = float(m.group(1)), float(m.group(2))
-        self.assertTrue(lo <= 13.0 <= hi, dbg)
+        self.assertTrue(lo <= 14.0 <= hi, dbg)
 
     def test_dict_loads_and_has_expected_size(self):
         """PUSH_WINDOW_OVERRIDES has ~460 cells (frac-aligned) and ATL HIGH 5
