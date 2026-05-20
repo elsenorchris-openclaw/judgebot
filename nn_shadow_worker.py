@@ -38,6 +38,8 @@ import nn_shadow
 import nn_shadow_strategy
 import shared_cache_reader
 import climate_normals
+import wethr_rm
+import config as _cfg
 
 log = logging.getLogger("judge.nn_shadow_worker")
 
@@ -460,6 +462,12 @@ def _try_auto_execute(cand, packet: dict, decision: dict,
                     continue
                 if p.get("action") != direction:
                     continue
+                # 2026-05-20: scope cap to candidate's climate_day so a stuck
+                # prior-day position (e.g. KMSY 5/19 Kalshi-pending settlement)
+                # doesn't block today's BUYs on the same station+series.
+                pos_date = p.get("date_str") or p.get("climate_day")
+                if pos_date and pos_date != cand.climate_day:
+                    continue
                 n_existing += 1
     except Exception:
         pass
@@ -685,6 +693,39 @@ def _build_shadow_packet(cand: market_universe.Candidate) -> Optional[dict]:
     # rm choice — high series uses high_f, low series uses low_f
     is_high = cand.series_prefix == "KXHIGH"
     rm = wethr.get("high_f") if is_high else wethr.get("low_f")
+
+    # F1 (2026-05-20): validate rm freshness against Kalshi LST climate-day boundary.
+    # Kalshi market close_time confirms LST midnight per market (e.g.,
+    # KXLOWTAUS-26MAY20 close_time=2026-05-21T06:00Z = LST midnight ending 5/20).
+    # wethr_rm.lst_midnight_utc_ts encodes the same. Without this guard, a stale
+    # 5/19-evening rm reading was used as a 5/20 anchor (KAUS B67.5 BUY_NO loss).
+    # paper_judge_bot.py:458,753 already does this for the LLM/exit paths; push was
+    # missing. Use per-side LST date (date_low/date_high derived by wethr-cache-service
+    # from time_of_*_utc; legacy 'date' field lags 1-2d behind CLI ingest).
+    if rm is not None and bool(getattr(_cfg, "PUSH_VALIDATE_RM_CLIMATE_DAY", True)):
+        _cache_date = (wethr.get("date_high") if is_high else wethr.get("date_low")) or wethr.get("date")
+        _time_of_ext = wethr.get("time_of_high_utc") if is_high else wethr.get("time_of_low_utc")
+        _grace = float(getattr(_cfg, "PUSH_RM_GRACE_SEC_HIGH" if is_high else "PUSH_RM_GRACE_SEC_LOW",
+                                3600.0 if is_high else 900.0))
+        try:
+            _rmv = wethr_rm.validate_rm_for_climate_day(
+                station=cand.station,
+                climate_day=cand.climate_day,
+                cache_date=_cache_date,
+                time_of_extreme_utc=_time_of_ext,
+                now_utc_ts=time.time(),
+                grace_sec=_grace,
+            )
+        except Exception:
+            log.exception("push: F1 validator raised for %s %s", cand.station, cand.ticker)
+            _rmv = {"ok": False, "reason": "validator_exception"}
+        if not _rmv.get("ok"):
+            log.warning(
+                "push: nulling stale rm for %s %s side=%s reason=%s cache_date=%s climate_day=%s rm=%s",
+                cand.station, cand.ticker, ("high" if is_high else "low"),
+                _rmv.get("reason"), _cache_date, cand.climate_day, rm,
+            )
+            rm = None
 
     # Compute seconds_to_close (UTC seconds until LST midnight close) so
     # execute_buy's guardrails.check_buy time-to-close gate doesn't reject

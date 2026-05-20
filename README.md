@@ -4,6 +4,141 @@ A judgment-first Kalshi trading bot for daily weather markets. Claude is the
 entry+exit decision-maker; deterministic guardrails wrap the LLM so the
 worst-case blast radius is bounded by code, not by prompt quality.
 
+## Position cap scoped to candidate.climate_day — 2026-05-20 19:30 UTC
+
+Bug fix. The per-(station, series_prefix, direction) position cap in
+`nn_shadow_worker._try_auto_execute` was counting positions across ALL
+climate_days. So a stuck position from a previous climate_day blocked
+today's BUY decisions on the same station+series.
+
+**Trigger:** KMSY 5/19 HIGH NOLA positions (B86.5 BUY_NO, B90.5 BUY_YES)
+sat unsettled in positions.json because Kalshi never posted `result`
+(NOAA Tmax dispute on KMSY). Both `status=closed result=` via API,
+`expected_expiration_time=2026-05-20T19:00:00Z` (passed), hard deadline
+2026-05-26T14:00:00Z. Last-hour analysis at 19:00 UTC: 36 KMSY HIGH
+BUY_NO decisions + 7 BUY_YES blocked by `position_cap BUY_NO@KMSY/KXHIGH`
+even though no live-day KMSY HIGH position existed.
+
+**Fix:** add a date check inside the cap-counting loop. Only positions
+whose `date_str` (or fallback `climate_day`) matches `cand.climate_day`
+count toward the cap.
+
+```python
+if p.get(action) != direction:
+    continue
+# 2026-05-20: scope cap to candidate's climate_day so a stuck
+# prior-day position (e.g. KMSY 5/19 Kalshi-pending settlement)
+# doesn't block today's BUYs on the same station+series.
+pos_date = p.get(date_str) or p.get(climate_day)
+if pos_date and pos_date != cand.climate_day:
+    continue
+n_existing += 1
+```
+
+**Tests:** `tests/test_position_cap_climate_day.py` — 4 new tests:
+- prior-day position does NOT block today's BUY (regression for the fix)
+- same-day position STILL blocks (no regression on intended behavior)
+- prior-day opposite-direction position irrelevant (direction filter check)
+- climate_day field fallback works when date_str absent
+
+Full suite: 336 passed / 4 skipped (was 332/4 — added 4 new, no regressions).
+
+**Notes for future readers:**
+- The matching correlation cap at `nn_shadow_worker.py:482` (`cap_key =
+  (cand.station, side_label, cand.climate_day)`) was already climate_day-
+  scoped — this fix aligns the position cap with it.
+- Prior-day positions still appear in positions.json until the settle
+  worker resolves them (waiting on Kalshi `result` field). The cap fix
+  doesn't affect settlement — it just stops them from blocking new BUYs
+  during the wait.
+- Backup file: `nn_shadow_worker.py.pre_climateday_poscap_20260520`.
+
+## Scout label: claude_read → nn_read (push pure-nn path) — 2026-05-20 18:00 UTC
+
+Cosmetic + diagnostic fix. The scout's `prob_source` field was hard-coded to
+"claude_read" whenever the regex in `_claude_prob_for_side()` matched a
+`P(YES)=X.XX` or `P(NO)=X.XX` literal in `decision.read`. With LLM_DISPATCH_MODE=off
+since 2026-05-19, the only thing populating `decision.read` is the push pure-nn
+worker, which builds a synthetic EntryDecision with read="pure-nn auto: BUY_YES
+edge=21.7pp P(YES)=0.567 ..." — i.e., the regex matches the NN-derived prob
+embedded in the strategy's own reason string. So the "claude_read" label was
+misleading: no Claude call had happened, and the prob was from nn_match_fast.
+
+Fix: in `_claude_prob_for_side()`, when the regex matches, check whether the
+read starts with "pure-nn auto" and return "nn_read" instead of "claude_read".
+Legacy path (if LLM dispatch is ever re-enabled) still returns "claude_read"
+for real Claude responses. Three unit-style cases verified against the running
+module: push synthetic→nn_read, llm-style→claude_read, no-P-fallback→edge_info.
+
+**Notes for future readers**:
+- `prob_source` field appears in `data/by_date/<day>/scouts.jsonl` for every
+  scout invocation, telemetry-only (not used for filtering or branching).
+- The scout itself isn't an LLM thing — it does orderbook-level sweep planning
+  inside `execute_buy()` for any entry path (LLM or pure-nn). When you see a
+  scout SKIP "no level passed edge gate", it's because the live REST orderbook
+  diverged from the WS BBO that triggered the entry: by the time the scout
+  fetched the book, the top quote that pure-nn keyed on was filled or pulled.
+  This is normal anti-staleness behavior, not a bug.
+
+**Files shipped.** paper_judge_bot.py (7-line replacement at _claude_prob_for_side).
+Backup: paper_judge_bot.py.pre_nn_read_label_20260520. Tests 332 passed / 4
+skipped. PID 2420694.
+
+**Rollback.** Trivial: replace the conditional return with `return p, "claude_read"`.
+
+## Push F1 rm-staleness validator — 2026-05-20 14:31 UTC
+
+Wired wethr_rm.validate_rm_for_climate_day into nn_shadow_worker._build_push_packet.
+The validator already existed (paper_judge_bot.py:458,753 uses it for the LLM
+dispatch + exit paths) but nn_shadow_worker was reading wethr.get("low_f") /
+wethr.get("high_f") straight into the packet without the climate-day match check
+— the push pure-code arch shipped 2026-05-19 inherited that gap.
+
+**Bug it fixes.** 2026-05-20 KAUS LOW B67.5 BUY_NO loss (-$78). At entry, wethr
+cache held low_f=66, date_low=2026-05-19, time_of_low_utc=2026-05-20 02:53 UTC
+(i.e., 5/19 21:53 CDT — still 5/19 LST climate day). Bot used that 5/19 rm as
+the 5/20 rm-lock anchor. NWS CLI confirms 5/20 KAUS min was 68F at 4:54 AM →
+in YES window [66.5, 68.5] → BUY_NO loses. KOKC LOW B53.5 (-$72) hit the same
+pattern (low_f=53, date_low=2026-05-19).
+
+**Kalshi boundary confirmation.** API call to KXLOWTAUS-26MAY20-B67.5 returns
+close_time=2026-05-21T06:00Z = LST midnight ending 5/20 (KAUS = CST, UTC-6).
+Rules: settles on NWS Climatological Report (Daily). Matches the LST midnight
+encoding in wethr_rm.lst_midnight_utc_ts that the validator was already using.
+
+**What the validator checks (per wethr_rm.validate_rm_for_climate_day):**
+1. station has a TZ mapping
+2. climate_day parses
+3. cache_date string equals ticker climate_day (the gate KAUS failed)
+4. now >= LST_midnight + grace_sec
+5. time_of_extreme_utc, if present, falls within [LST_midnight, LST_midnight+24h)
+
+Per-side LST date preferred: date_low for LOW tickers, date_high for HIGH
+(wethr-cache-service derives these from time_of_*_utc since 2026-05-16). Falls
+back to wethr's legacy "date" field if the per-side field is absent.
+
+**Config (config.py):**
+- PUSH_VALIDATE_RM_CLIMATE_DAY: bool = True   # instant rollback flag
+- PUSH_RM_GRACE_SEC_LOW: float = 900.0        # 15-min grace; matches LLM-path LOW
+- PUSH_RM_GRACE_SEC_HIGH: float = 3600.0      # 60-min grace; matches LLM-path HIGH
+
+**Files shipped.** nn_shadow_worker.py (imports + ~30-line validator block at
+_build_push_packet), config.py (3 new constants). Tests 332 passed / 4 skipped
+— same as pre-patch baseline (no new tests added; behavior covered by the
+existing wethr_rm validator tests). Backups:
+- nn_shadow_worker.py.pre_f1_push_20260520
+- config.py.pre_f1_push_20260520
+- README.md.pre_f1_push_20260520
+
+**Verified live.** Restart via "sudo systemctl start paper-judge-bot.service"
+(PID 2066812; previous nohup orphan PID 2059438 cleaned up — Rule #3 violation
+during initial debugging, corrected immediately). F1 warnings fire on KAUS LOW
+5/20, KOKC LOW 5/20, KLAX HIGH 5/20 (cache held 5/19 rm=75 for KLAX HIGH because
+today's high had not yet beaten yesterday's at that point). Fresh-date stations
+(KDFW LOW 5/20, KAUS HIGH 5/20) kept their rm unchanged.
+
+**Rollback.** Set PUSH_VALIDATE_RM_CLIMATE_DAY=False in config.py and restart.
+
 ## Push window overrides: ACCURACY-FIRST — 2026-05-20 11:56 UTC
 
 Fundamental redesign of the override selection criterion. Previously the
