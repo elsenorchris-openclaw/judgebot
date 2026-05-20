@@ -517,6 +517,17 @@ PUSH_PEAK_FRACTIONAL_PATH: str = "/home/ubuntu/data/peak_fractional_5yr_10day.js
 # volume while filtering bottom-edge marginal trades.
 PUSH_MIN_EDGE_PP: int = 12
 
+# Minimum hours-until-peak for HIGH-series entries (defense-in-depth on top
+# of the window override). At peak, rm has converged on the day's true max,
+# so the nn_match mu projection over-extrapolates and flips adjacent
+# brackets the wrong way. 2026-05-20 backtest n=47 HIGH push trades:
+# h_to_peak<0.5 catches 3 losers (PHIL B95.5 BUY_NO, NOLA B86.5 BUY_NO,
+# NOLA B88.5 BUY_YES) for -$13.07; 0 winners caught (nearest winner at
+# h_to_peak=+0.70). Mechanism: at peak, rm ~= final max with stable
+# obs_trend_30m; mu still projects upward = systematic over-projection.
+# Set to None or 0.0 to disable.
+PUSH_MIN_H_TO_PEAK_HIGH: float = 0.5
+
 # Entry-price guardrails (cents). Skip if the ask we'd pay is outside [floor, ceil].
 # Floor protects against long-shot bets; ceiling protects against settled markets.
 # 2026-05-19 v3: BUY_YES needs a higher floor than BUY_NO. Analysis of 170 shadow

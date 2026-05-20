@@ -54,6 +54,57 @@ require backtest validation before ship.
 **Backups:** `config.py.pre_tier1_gates_20260520`,
 `nn_shadow_worker.py.pre_tier1_gates_20260520`.
 
+## HIGH h_to_peak gate (block at-or-past-peak entries) — 2026-05-20 22:07 UTC
+
+Defense-in-depth on top of the window override. New gate (2a) in
+`nn_shadow_worker._try_auto_execute`: HIGH-series entries with
+`h_to_peak < PUSH_MIN_H_TO_PEAK_HIGH` (default 0.5) are blocked. At
+peak, `rm` has converged on the day's true max, leaving no room for the
+nn_match `mu` projection to add real signal — instead it
+over-extrapolates and flips adjacent brackets the wrong way.
+
+**Today's losses caught (would have been blocked):**
+- `KXHIGHPHIL-26MAY20-B95.5` BUY_NO @ 15c (h2pk=-0.04) → -$3.64
+- `KXHIGHTNOLA-26MAY20-B86.5` BUY_NO @ 62c (h2pk=-0.01) → -$4.88
+- `KXHIGHTNOLA-26MAY20-B88.5` BUY_YES @ 36c (h2pk=-0.01) → -$4.55
+- Total: **-$13.07 saved, 0 winners blocked.**
+
+**Backtest:** n=47 executed HIGH push trades (27 settled 5/19 + 20 today
+fair_pnl proxy). Filter sweep:
+
+| T | blocks | h:hu | lift | buffer to nearest winner |
+|---|--------|------|------|--------------------------|
+| 0.5 | 3 | 3:0 | +$13.07 | +0.20 (winner at h2pk=+0.70) |
+| 0.7 | 4 | 4:0 | +$17.83 | +0.00 (zero buffer, rejected) |
+
+Chose 0.5 for the +0.20 buffer + bulletproof mechanism (T=0.7 catches
+BOS B90.5 at h2pk=+0.55 — same direction but 33 min pre-peak so the
+"rm has converged" claim is weaker).
+
+**Why this is defensible at low n:** mechanism is mechanical, not
+statistical. At peak, `rm` is essentially the final `day_max`; any
+upward μ projection is structurally wrong. Confirms the 5/19 h2pk
+deepdive ("HIGH at-peak entries catastrophic: h2pk in [-99, 0.5) WR
+31%") which today's accuracy-first override regen didn't fully
+constrain.
+
+**Tests:** `tests/test_h2pk_gate.py` — 8 new tests (at-peak blocked,
+past-peak blocked, below-threshold blocked, at-threshold allowed, above
+allowed, LOW series unaffected, None h2pk allowed, config-None
+disables). Full suite 353 passed / 4 skipped.
+
+**Rollback:** `PUSH_MIN_H_TO_PEAK_HIGH = None` or `= 0.0` disables.
+Or revert: `cp nn_shadow_worker.py.pre_h2pk_gate_20260520 nn_shadow_worker.py && cp config.py.pre_h2pk_gate_20260520 config.py && sudo systemctl restart paper-judge-bot.service`.
+
+**Notes for future readers:**
+- HOU T84 today (h2pk=+1.7, lost) is NOT caught — different mechanism
+  (T-cold BUY_NO with high σ inflated edge). Separate filter needed.
+- LOW series intentionally not gated; mechanism may apply but no data
+  validates yet. Revisit if LOW losses cluster near peak/min.
+- Recommended follow-up: audit `push_window_overrides.py` for cells
+  with `after > -0.3` and decide whether to tighten. The h2pk gate
+  makes that audit lower-pressure.
+
 ## Position cap scoped to candidate.climate_day — 2026-05-20 19:30 UTC
 
 Bug fix. The per-(station, series_prefix, direction) position cap in

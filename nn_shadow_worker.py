@@ -416,6 +416,17 @@ def _try_auto_execute(cand, packet: dict, decision: dict,
     in_win, win_dbg = _in_decision_window(cand.station, series, local_hour, cand.climate_day)
     if not in_win:
         return False, f"outside_window {cand.station}/{series}/{short_dir}: {win_dbg}"
+    # (2a) HIGH-only: block at-or-past-peak entries. At peak, rm has converged
+    # on the day's true max, leaving no headroom for the nn_match mu to add
+    # real signal -- instead it over-extrapolates and flips adjacent brackets
+    # the wrong way. 2026-05-20: 3 today losses -$13.07 at h_to_peak<0.5.
+    if series == "HIGH":
+        h2pk = (packet.get("local_clock") or {}).get("h_to_peak")
+        min_h2pk_raw = getattr(_cfg, "PUSH_MIN_H_TO_PEAK_HIGH", 0.5)
+        if h2pk is not None and min_h2pk_raw is not None:
+            min_h2pk = float(min_h2pk_raw)
+            if h2pk < min_h2pk:
+                return False, f"h2pk_too_low {h2pk:.2f}<{min_h2pk}"
     if _rt is None:
         return False, "rt_not_initialized"
     # (2b) Tier 1 runtime gates — physics-catastrophic regimes the matcher
