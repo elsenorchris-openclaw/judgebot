@@ -4,6 +4,60 @@ A judgment-first Kalshi trading bot for daily weather markets. Claude is the
 entry+exit decision-maker; deterministic guardrails wrap the LLM so the
 worst-case blast radius is bounded by code, not by prompt quality.
 
+## Push window overrides from FRACTIONAL OFFSET 5000-day backtest — 2026-05-20 11:33 UTC
+
+Re-ran the 5000-day MAE backtest, but binned by **fractional offset from
+fractional peak** (5yr 10-day rolling) instead of integer LST hour. End-to-
+end fractional: no integer hour bins anywhere in the pipeline.
+
+Why this matters: the previous (per-LST-hour) MAE pooled across days with
+different peak times, so "LST hour 11" mixed days where peak was at 13 (2h
+gap) with days where peak was at 15 (4h gap). Per-offset analysis always
+compares the matcher at consistent peak-relative positions.
+
+Methodology:
+  1. /home/ubuntu/tools/per_hour_quality/per_hour_quality_v2.py walks every
+     historical station-day. For each (station, side, day-of-month), looks
+     up the 5yr-10day fractional peak. For each offset in
+     [-4.0, -3.5, ..., +1.0] (0.5h grid), computes
+     cur_lst = frac_peak + offset, runs nn_match.predict(), records err.
+  2. Aggregates per (station, month, offset, side) to phq_offset_combined.csv.
+     n=5280 cells from ~100K station-days × 22 offsets.
+  3. /home/ubuntu/tools/per_hour_quality/build_overrides_offset.py picks
+     tight_win = contiguous offset bins with firing>=65% AND settled<=30%
+     AND n>=20 AND mae <= 1.3*best_mae. Min window width 0.5h.
+  4. before = -offset_lo, after = offset_hi.
+
+Sample ATL HIGH May (all months also regenerated):
+  Previous (per-LST-hour 800-day):  (2.867, -0.867)  window [13.0, 15.0] at May 15
+  NEW      (offset 5000-day):        (4.0, -1.0)      window [11.88, 14.88] at May 19
+
+Coverage: 462/480 cells (was 460). 18 fall back to global.
+
+May 19 replay PnL (real settlements + bid MTM):
+  CURRENT (frac-aligned per-LST-hour 800-day): n=17  PnL=-$3.45  ROI=-4.3%
+  NEW (offset-derived 5000-day):                n=12  PnL=+$5.65  ROI=+10.1%
+
+The NEW windows are MORE SELECTIVE (n=12 vs n=17) and produce
++$9 lift on May 19. Per-direction:
+  HIGH BUY_NO:  +$5.53 (was +$1.16)
+  HIGH BUY_YES: -$10.12 (was -$4.20)   ← still the regime bleeder
+  LOW BUY_NO:   +$3.84  (was -$7.65)   ← biggest swing
+  LOW BUY_YES:  +$6.40  (was +$7.24)
+
+Day-by-day drift + month rollover both verified live:
+  ATL HIGH 2026-05-01: peak 15.42, window [11.4, 14.4]
+  ATL HIGH 2026-05-19: peak 15.88, window [11.9, 14.9]
+  ATL HIGH 2026-06-15: peak 15.30, window [12.3, 14.3]  (June override picks up)
+
+Source data (NEW):
+  /home/ubuntu/data/per_hour_quality_offset/  (per-station CSVs)
+  /home/ubuntu/data/phq_offset_combined.csv   (aggregated, 5280 rows)
+
+Tests: 350 passed / 4 skipped / 1 pre-existing fail.
+
+Rollback: cp push_window_overrides.py.pre_offset_20260520 push_window_overrides.py + restart.
+
 ## Push window overrides regenerated frac-aligned — 2026-05-20 07:00 UTC
 
 Follow-up to the fractional peak source ship 09 min earlier. Overrides were
