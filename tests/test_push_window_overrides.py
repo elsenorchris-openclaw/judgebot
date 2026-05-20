@@ -64,16 +64,18 @@ class TestPushWindowOverrides(unittest.TestCase):
         self.assertIn("window=[14.6,16.1]", dbg)
 
     def test_fallback_when_cell_missing(self):
-        """KDEN LOW May has no override (filtered: no_qualifying_window).
-        Must fall back to global LOW window [peak-1.0, peak+0.5]."""
-        nsw._lookup_peak_hour = lambda *a, **kw: 4.93   # DEN LOW May trough
+        """Robust to override-dict regen: monkey-patch PUSH_WINDOW_OVERRIDES
+        to a dict that excludes our test cell, then verify fallback."""
+        import push_window_overrides as pwo
+        nsw._lookup_peak_hour = lambda *a, **kw: 4.93   # any LOW trough
+        empty_dict: dict = {}
         with mock.patch.dict("sys.modules"):
             import importlib
             cfg = importlib.import_module("config")
-            with mock.patch.object(cfg, "USE_PUSH_WINDOW_OVERRIDES", True):
+            with mock.patch.object(cfg, "USE_PUSH_WINDOW_OVERRIDES", True), \
+                 mock.patch.object(pwo, "PUSH_WINDOW_OVERRIDES", empty_dict):
                 ok, dbg = nsw._in_decision_window("KDEN", "LOW", 4.5,
                                                   "2026-05-15")
-        # h=4.5 inside global [3.93, 5.43] → True with src=global
         self.assertTrue(ok, dbg)
         self.assertIn("src=global", dbg)
 
@@ -92,16 +94,16 @@ class TestPushWindowOverrides(unittest.TestCase):
         self.assertIn("window=[12.0,14.0]", dbg)
 
     def test_dict_loads_and_has_expected_size(self):
-        """Sanity: PUSH_WINDOW_OVERRIDES exists and covers 394 cells."""
+        """Sanity: PUSH_WINDOW_OVERRIDES loads with at least 380 entries
+        (current value ~424 with 5000-day data); ATL HIGH May is present."""
         from push_window_overrides import PUSH_WINDOW_OVERRIDES
         self.assertGreaterEqual(len(PUSH_WINDOW_OVERRIDES), 380)
-        # ATL HIGH May is one of the well-formed cells
+        # ATL HIGH May has been a well-formed cell since the 800-day sweep
         self.assertIn(("KATL", "HIGH", 5), PUSH_WINDOW_OVERRIDES)
         b, a = PUSH_WINDOW_OVERRIDES[("KATL", "HIGH", 5)]
+        # Values are stable across 800-day and 5000-day data
         self.assertAlmostEqual(b, 2.62, places=2)
         self.assertAlmostEqual(a, -0.62, places=2)
-        # KDEN LOW May is one of the gaps (filtered: no_qualifying_window)
-        self.assertNotIn(("KDEN", "LOW", 5), PUSH_WINDOW_OVERRIDES)
 
 
 if __name__ == "__main__":
