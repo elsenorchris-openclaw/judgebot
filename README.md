@@ -27,6 +27,19 @@ Tables (gitignored, regenerate via `tools/per_hour_quality/export_regime_tables.
 `data/regime_mae_deltas.json` + `data/climate_normals_hourly.json`.
 Verified live: 66/66 decisions adjusted. Backups `*.pre_regime_20260521`.
 
+**Update (later 2026-05-21): tiers re-calibrated + tspeak folded in.** Holdout
+calibration of `predicted regime-MAE → actual MAE` is monotonic for adjusted
+MAE ≥ ~1.0, but the favorable extreme over-corrects (predicted 0.57 → actual
+1.63 — additive deltas extrapolate below the ~1.2°F irreducible floor). Re-tiered
+`PUSH_MAE_CONF_TIERS` to `<1.6→1.0× / 1.6-2.4→0.7× / 2.4-3.2→0.5× / >3.2→0.3×`
+(per-tier actual MAE ~1.4/1.67/2.21/3.81); the wide lowest tier means the
+over-corrected favorable extreme just caps at full size (no over-sizing).
+`tspeak` (time since the running extreme; stale +0.72) added as a 5th regime
+delta — runtime via `rm_age`. **Bugfix:** `_build_shadow_packet` was calling
+`get_rm_age_sec(station,"high"/"low")` but it expects `"max"/"min"` → had
+silently returned None forever (rm_age_sec logged as None; tspeak never fired).
+Fixed → 78/78 decisions now apply all 5 regime dims. Backups `*.pre_tiers_20260521`.
+
 ## Push override: HIGH median-bias + MAE confidence-sizing — 2026-05-21
 
 > **UPDATE 2026-05-21 (later): bias REVERTED, MAE sizing KEPT.** A Kalshi-settled

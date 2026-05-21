@@ -448,6 +448,23 @@ def _rt_wind_bucket(mph):
     return "strong"
 
 
+def _rt_tspeak_bucket(rm_age_sec):
+    # minutes since the running extreme was set (proxy for backtest tspeak)
+    if rm_age_sec is None:
+        return None
+    try:
+        m = float(rm_age_sec) / 60.0
+    except (TypeError, ValueError):
+        return None
+    if m < 10.0:
+        return "not_yet"
+    if m < 30.0:
+        return "fresh"
+    if m < 120.0:
+        return "recent"
+    return "stale"
+
+
 def _rt_anomaly_bucket(station, climate_day, local_hour, cur_tmpf):
     if cur_tmpf is None or local_hour is None:
         return None
@@ -481,12 +498,19 @@ def _regime_adjusted_mae(cell_mae, cand, pkt, nn_res):
         return cell_mae, {}
     wo = pkt.get("wethr_obs") or {}
     ctx = pkt.get("local_clock") or {}
+    # tspeak proxy: minutes since the running extreme was set (rm_age). The
+    # backtest tspeak = mins since the trajectory's max(HIGH)/min(LOW) bin; the
+    # bot's rm_age (time since wethr last set the running max/min) measures the
+    # same "time since the extreme so far" and is the closest runtime signal.
+    _rm_age = (pkt.get("rm_age_max_sec") if cand.series_prefix == "KXHIGH"
+               else pkt.get("rm_age_min_sec"))
     bk = {
         "sigma":   _rt_sigma_bucket(nn_res.get("sigma_natural")),
         "anomaly": _rt_anomaly_bucket(cand.station, cand.climate_day,
                                       ctx.get("local_hour"), wo.get("temp_f")),
         "sky":     _rt_sky_bucket(wo.get("cloud_1_coverage")),
         "wind":    _rt_wind_bucket(wo.get("wind_speed_mph")),
+        "tspeak":  _rt_tspeak_bucket(_rm_age),
     }
     total = 0.0
     applied = {}
@@ -951,8 +975,11 @@ def _build_shadow_packet(cand: market_universe.Candidate) -> Optional[dict]:
     # for nn_shadow's temp_history augmentation).
     temp_hist = shared_cache_reader.get_temp_history(cand.station, lookback_sec=3600.0)
     hourly_obs_today = wethr.get("hourly_obs_today") or []
-    rm_age_max = shared_cache_reader.get_rm_age_sec(cand.station, "high")
-    rm_age_min = shared_cache_reader.get_rm_age_sec(cand.station, "low")
+    # 2026-05-21 bugfix: get_rm_age_sec expects kind in {"max","min"}, not
+    # "high"/"low" — it had silently returned None (rm_age_sec logged as None,
+    # and the regime tspeak proxy never fired). Now passes the correct kind.
+    rm_age_max = shared_cache_reader.get_rm_age_sec(cand.station, "max")
+    rm_age_min = shared_cache_reader.get_rm_age_sec(cand.station, "min")
     th_range = shared_cache_reader.temp_history_range_60m(cand.station)
     trend60 = shared_cache_reader.compute_trend_60m_regression(cand.station)
     trend30 = shared_cache_reader.compute_trend_30m(cand.station)

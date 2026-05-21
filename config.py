@@ -537,11 +537,18 @@ USE_PUSH_BIAS_CORRECTION: bool = False  # REVERTED 2026-05-21: even the MEDIAN
 USE_PUSH_MAE_SIZING: bool = True        # KEPT — validated (corr 0.62); only
     # scales bet size, never flips a bet (no boundary risk).
 # (mae_lo, mae_hi, size_multiplier). mae=None → 0.5 (unknown/fallback).
+# 2026-05-21: re-calibrated against the holdout (predicted regime-adjusted MAE
+# -> actual MAE). Decile calibration is monotonic for adjusted_mae>=~1.0; the
+# favorable extreme over-corrects (predicted 0.57 -> actual 1.63, since the
+# additive deltas extrapolate below the ~1.2F irreducible floor), so the lowest
+# tier is widened to <1.6 (all full size — over-correction can't over-size past
+# the 1.0 cap). Per-tier actual MAE: <1.6→~1.4, 1.6-2.4→1.67, 2.4-3.2→2.21,
+# >3.2→3.81; multipliers ~ accuracy (between 1/MAE and Kelly 1/MAE^2).
 PUSH_MAE_CONF_TIERS: list = [
-    (0.0, 1.0, 1.0),     # <=1F MAE: full size (settles ~1.3F)
-    (1.0, 1.5, 0.75),
-    (1.5, 2.5, 0.5),
-    (2.5, 99.0, 0.3),    # >=2.5F MAE: minimal (settles ~3F)
+    (0.0, 1.6, 1.0),     # adjusted MAE <1.6F: full size (actual ~1.4F)
+    (1.6, 2.4, 0.7),     # actual ~1.67F
+    (2.4, 3.2, 0.5),     # actual ~2.21F
+    (3.2, 99.0, 0.3),    # actual ~3.81F: minimal
 ]
 
 # 2026-05-21: GLOBAL regime-MAE adjustment. Before tiering the sizing MAE, adjust

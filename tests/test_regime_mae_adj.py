@@ -32,6 +32,13 @@ class TestRegimeBuckets(unittest.TestCase):
         self.assertEqual(nsw._rt_wind_bucket(25.0), "strong")    # ~21.7 kt
         self.assertIsNone(nsw._rt_wind_bucket(None))
 
+    def test_tspeak(self):
+        self.assertEqual(nsw._rt_tspeak_bucket(300), "not_yet")    # 5 min
+        self.assertEqual(nsw._rt_tspeak_bucket(60 * 20), "fresh")  # 20 min
+        self.assertEqual(nsw._rt_tspeak_bucket(60 * 60), "recent")  # 60 min
+        self.assertEqual(nsw._rt_tspeak_bucket(60 * 200), "stale")  # 200 min
+        self.assertIsNone(nsw._rt_tspeak_bucket(None))
+
     def test_anomaly(self):
         nsw._climate_normals = {"KMIA": {"05-21": [None] * 14 + [80.0] + [None] * 9}}
         nsw._regime_tables_loaded = True
@@ -55,6 +62,7 @@ class TestRegimeAdjustedMae(unittest.TestCase):
             "anomaly": {"hot": 0.98, "cold": -0.67, "normal": -0.15},
             "sky": {"clear": -0.26, "cloudy": 0.51},
             "wind": {"calm": -0.26, "strong": 0.75},
+            "tspeak": {"stale": 0.72, "fresh": -0.22, "not_yet": -0.18},
         }
         nsw._climate_normals = {"KMIA": {"05-21": [None] * 14 + [80.0] + [None] * 9}}
         nsw._regime_tables_loaded = True
@@ -67,29 +75,30 @@ class TestRegimeAdjustedMae(unittest.TestCase):
         config.PUSH_REGIME_MAE_DAMP = self._damp
 
     def _cand(self):
-        return SimpleNamespace(station="KMIA", climate_day="2026-05-21")
+        return SimpleNamespace(station="KMIA", climate_day="2026-05-21",
+                               series_prefix="KXHIGH")
 
     def test_hard_regime_raises_mae(self):
-        # hot + cloudy + strong wind + high sigma -> all positive deltas
+        # hot + cloudy + strong wind + high sigma + stale -> all positive deltas
         pkt = {"wethr_obs": {"temp_f": 92.0, "cloud_1_coverage": "OVC", "wind_speed_mph": 25.0},
-               "local_clock": {"local_hour": 14}}
+               "local_clock": {"local_hour": 14}, "rm_age_max_sec": 60 * 200}
         nn_res = {"sigma_natural": 3.0}
         adj, dbg = nsw._regime_adjusted_mae(1.4, self._cand(), pkt, nn_res)
-        # raw_delta = 0.98+0.51+0.75+0.71 = 2.95; *0.6 = 1.77; adj = 1.4+1.77 = 3.17
         self.assertGreater(adj, 1.4)
-        self.assertAlmostEqual(adj, round(1.4 + 0.6 * (0.98 + 0.51 + 0.75 + 0.71), 3), places=2)
+        exp = round(1.4 + 0.6 * (0.98 + 0.51 + 0.75 + 0.71 + 0.72), 3)
+        self.assertAlmostEqual(adj, exp, places=2)
 
     def test_easy_regime_lowers_mae(self):
-        # cold + clear + calm + low sigma -> all negative deltas
+        # cold + clear + calm + low sigma + fresh -> all negative deltas
         pkt = {"wethr_obs": {"temp_f": 70.0, "cloud_1_coverage": "CLR", "wind_speed_mph": 3.0},
-               "local_clock": {"local_hour": 14}}
+               "local_clock": {"local_hour": 14}, "rm_age_max_sec": 60 * 20}
         nn_res = {"sigma_natural": 0.9}
         adj, dbg = nsw._regime_adjusted_mae(1.4, self._cand(), pkt, nn_res)
         self.assertLess(adj, 1.4)
 
     def test_floor_at_0_1(self):
         pkt = {"wethr_obs": {"temp_f": 70.0, "cloud_1_coverage": "CLR", "wind_speed_mph": 3.0},
-               "local_clock": {"local_hour": 14}}
+               "local_clock": {"local_hour": 14}, "rm_age_max_sec": 60 * 20}
         nn_res = {"sigma_natural": 0.9}
         adj, _ = nsw._regime_adjusted_mae(0.2, self._cand(), pkt, nn_res)
         self.assertGreaterEqual(adj, 0.1)
