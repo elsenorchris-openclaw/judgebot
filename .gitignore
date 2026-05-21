@@ -28,6 +28,7 @@ data/
 *.bak_*
 *.pre_*
 *.preanchored*
+*.800day
 pre_*.bak
 pre_drct_*
 pre_f1_*

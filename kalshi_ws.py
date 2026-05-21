@@ -59,9 +59,16 @@ _RECONNECT_MAX_S = 30.0
 # wrong, not the market. Fix: trigger fresh orderbook_snapshot via re-subscribe
 # (a) on inversion detection, (b) periodically per-ticker.
 _RESYNC_AGE_SEC = 300.0           # periodic: resync any ticker whose snapshot is older than this
-_RESYNC_PER_TICKER_RATE_SEC = 30.0 # don't resync the same ticker more than once per 30s
+_RESYNC_PER_TICKER_RATE_SEC = 5.0  # 2026-05-20: tightened 30->5s for faster drift recovery; max ~46 resyncs/sec at 230 tickers, well under Kalshi limits
 _RESYNC_BATCH_MAX = 20            # per worker tick, cap throughput
 _RESYNC_INTERVAL_SEC = 10.0       # worker tick cadence
+
+# 2026-05-20: write+read guards against transient inversion races (yes_bid + no_bid > 100).
+# When Kalshi matches two crossing limit orders, deltas arrive sequentially; between them
+# our cache momentarily shows the cross. With the guard on, _recompute_bbo refuses to
+# overwrite the cache with inverted state (keeps last good BBO visible) and get_bbo refuses
+# to return inverted state from any source. Set False to revert to pre-2026-05-20 behavior.
+_INVERSION_GUARD_ENABLED = True
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Module state (single connection per process)
@@ -141,6 +148,8 @@ _stats = {
     "resyncs_scheduled_age": 0,      # queued by periodic age check
     "resyncs_sent": 0,               # actually sent to Kalshi
     "resyncs_rate_limited": 0,       # dropped by per-ticker rate limit
+    "cache_writes_skipped_inverted": 0,  # 2026-05-20: write-side drift guard fires
+    "bbo_reads_blocked_inverted": 0,     # 2026-05-20: read-side drift guard fires
     # NEW 2026-05-16: full-ladder accessor telemetry (REST round-trip replacement)
     "ob_hits": 0,           # get_orderbook() served from WS cache
     "ob_misses_stale": 0,   # rejected: snapshot older than WS_BBO_FRESH_SEC
@@ -180,6 +189,21 @@ def _recompute_bbo(ticker: str) -> None:
     yes_bid_c = max(yb.keys()) if yb else 0
     no_bid_c = max(nb.keys()) if nb else 0
     yes_ask_c = (100 - no_bid_c) if no_bid_c > 0 else 0
+    # 2026-04-25: drift detection. yes_bid > yes_ask means the L2 book has
+    # gone stale (typically a missed delta) or is mid-match-race. Always log
+    # + schedule a fresh snapshot.
+    is_inverted = (yes_bid_c > 0 and yes_ask_c > 0 and yes_bid_c > yes_ask_c)
+    if is_inverted:
+        _bump("inversions_detected")
+        _schedule_resync(ticker, source="drift")
+    # 2026-05-20: when inverted, refuse to write the bad BBO into the cache.
+    # Consumers keep seeing the last known-good BBO from get_bbo until either
+    # the next clean delta resolves the cross or the scheduled resync lands.
+    # Callbacks also suppressed so event-driven consumers (nn_shadow_worker)
+    # do not fire on phantom-edge BBO.
+    if is_inverted and _INVERSION_GUARD_ENABLED:
+        _bump("cache_writes_skipped_inverted")
+        return
     with _cache_lock:
         prev = _bbo_cache.get(ticker)
         new_bbo = {
@@ -189,11 +213,6 @@ def _recompute_bbo(ticker: str) -> None:
         }
         _bbo_cache[ticker] = new_bbo
     _bump("bbo_updates")
-    # 2026-04-25: drift detection. yes_bid > yes_ask means the L2 book has
-    # gone stale (typically a missed delta). Schedule a fresh snapshot.
-    if yes_bid_c > 0 and yes_ask_c > 0 and yes_bid_c > yes_ask_c:
-        _bump("inversions_detected")
-        _schedule_resync(ticker, source="drift")
     # 2026-05-18: notify event-driven consumers (nn_shadow_worker).
     # Snapshot the callback list to release the lock fast; iterate outside
     # the lock so consumer code (which may take its own locks) can't deadlock us.
@@ -684,6 +703,8 @@ def start(sign_fn: Callable[[str, str], dict[str, str]],
                     f"resync_age={s.get('resyncs_scheduled_age',0)} "
                     f"resync_sent={s.get('resyncs_sent',0)} "
                     f"resync_rl={s.get('resyncs_rate_limited',0)} "
+                    f"cache_skip_inv={s.get('cache_writes_skipped_inverted',0)} "
+                    f"read_block_inv={s.get('bbo_reads_blocked_inverted',0)} "
                     f"pending={s.get('resync_pending',0)} | "
                     f"ob_hits={s.get('ob_hits',0)} "
                     f"ob_miss_empty={s.get('ob_misses_empty',0)} "
@@ -722,6 +743,16 @@ def get_bbo(ticker: str) -> Optional[dict[str, Any]]:
             return None
         if time.time() - e["ts"] > WS_BBO_FRESH_SEC:
             return None
+        # 2026-05-20: defensive read-side guard. Belt-and-suspenders with the
+        # write-side guard in _recompute_bbo. Catches any path that could put
+        # inverted state in the cache (e.g., direct snapshot apply, state
+        # restored on startup, or guard temporarily disabled then re-enabled).
+        if _INVERSION_GUARD_ENABLED:
+            yb_c = int(round(e["yes_bid"] * 100))
+            ya_c = int(round(e["yes_ask"] * 100))
+            if yb_c > 0 and ya_c > 0 and yb_c >= ya_c:
+                _bump("bbo_reads_blocked_inverted")
+                return None
         return dict(e)
 
 

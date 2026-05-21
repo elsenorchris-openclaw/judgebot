@@ -849,6 +849,56 @@ def _in_circular_window(hour: Optional[float], lo: float, hi: float) -> bool:
     return hour >= lo or hour < hi_norm
 
 
+# ─── Shadow μ helpers — 2026-05-16 (for 1c-anchored backtest enablement) ─────
+# These compute alternative μ methods at log time but do NOT affect the live
+# decision (which still uses ei["mu"] from _numerical_edge). After ~7 days of
+# settled data with these shadow columns populated, we can backtest
+# anchored-method accuracy on paper_judge_bot's own outcomes.
+
+def _shadow_pace_median(packet: dict) -> Optional[float]:
+    """The pace_median value used for projection — None if pace_band missing
+    or median < 0.7 (low-confidence projection band)."""
+    series = packet.get("series") or ""
+    is_high = "HIGH" in series
+    pb = packet.get("pace_band") if is_high else packet.get("pace_low_band")
+    pmed = (pb or {}).get("median")
+    if pmed is None: return None
+    try:
+        pmed = float(pmed)
+    except (TypeError, ValueError):
+        return None
+    if not (0.7 <= pmed <= 1.0):
+        return None
+    return pmed
+
+
+def _shadow_pace_proj(packet: dict) -> Optional[float]:
+    """Pure obs-derived: rm / pace_median. None when not applicable."""
+    rm = packet.get("running_min_or_max")
+    pmed = _shadow_pace_median(packet)
+    if rm is None or pmed is None:
+        return None
+    try:
+        return float(rm) / pmed
+    except (TypeError, ValueError, ZeroDivisionError):
+        return None
+
+
+def _shadow_anchored_proj(packet: dict, ei: Optional[dict]) -> Optional[float]:
+    """Anchored: consensus + (rm − consensus × pace_median). Best performer in
+    V2 max 6-day backtest (77.9% accuracy vs 73.1% blended, bias near zero)."""
+    if not ei: return None
+    cons = ei.get("mu_consensus_corr")
+    rm = packet.get("running_min_or_max")
+    pmed = _shadow_pace_median(packet)
+    if cons is None or rm is None or pmed is None:
+        return None
+    try:
+        return float(cons) + (float(rm) - float(cons) * pmed)
+    except (TypeError, ValueError):
+        return None
+
+
 def _packet_log_summary(packet: dict) -> dict:
     """Backtest-friendly snapshot of a packet's forecast/obs/edge state.
 
@@ -931,6 +981,14 @@ def _packet_log_summary(packet: dict) -> dict:
         "mu_consensus_raw": ei.get("mu_consensus_raw"),
         "mu_consensus_corr": ei.get("mu_consensus_corr"),
         "sigma_intraday_floor_used": ei.get("sigma_intraday_floor_used"),
+        # 2026-05-16: SHADOW columns for 1c-anchored backtest. Computed at log
+        # time, NOT used for live decisions. Once 7+ days of data accumulate
+        # with these populated, we can backtest anchored vs current μ on this
+        # bot's own settlements (V2 max's data was used for the initial
+        # validation; this enables paper_judge_bot-specific backtest).
+        "shadow_mu_pace_proj": _shadow_pace_proj(packet),
+        "shadow_mu_anchored_proj": _shadow_anchored_proj(packet, ei),
+        "shadow_pace_median_at_hour": _shadow_pace_median(packet),
         "pace_band": packet.get("pace_band"),
         "tail_band": packet.get("tail_band"),
         "pace_band_resolution": packet.get("pace_band_resolution"),
@@ -1053,14 +1111,20 @@ def _numerical_edge(packet: dict, default_sigma: float) -> Optional[dict]:
     #   - paper_min_bot settled n=41: nn 1.58°F MAE vs bot_mu 1.96°F (19% better)
     #   - LOW 20-station 36k cells: nn 1.50°F vs pace 3.51°F (57% better)
     #   - HIGH 20-station: ~13% better than pace baseline
-    # When nn_match returns None, the prescreen `skip_unless_nn_match` gate
-    # (config.PRESCREEN, shipped 2026-05-18) blocks the candidate downstream
-    # so no trade is taken — the bot's only sanctioned edge is nn_match.
-    # Forecast-derived μ (consensus_median, best_mae_*, raw_median) still gets
-    # COMPUTED below as a logging diagnostic but is never dispatched.
+    # Falls back to anchored/rm_ceiling/consensus when nn_match returns None.
     series = packet.get("series") or ""
     is_high = "HIGH" in series
     is_low = series.startswith("KXLOW")
+    rm_for_mu = packet.get("running_min_or_max")
+    pb = packet.get("pace_band") if is_high else packet.get("pace_low_band")
+    pmed_for_mu: Optional[float] = None
+    if pb and isinstance(pb, dict):
+        try:
+            _pm = float(pb.get("median") or 0)
+            if 0.7 <= _pm <= 1.0:
+                pmed_for_mu = _pm
+        except (TypeError, ValueError):
+            pmed_for_mu = None
 
     _nn_sigma_proj: Optional[float] = None
     try:
@@ -1138,15 +1202,65 @@ def _numerical_edge(packet: dict, default_sigma: float) -> Optional[dict]:
         except (TypeError, ValueError):
             _nn_res = None  # fall through
 
-    # 2026-05-19: anchored / low_rm_ceiling branches REMOVED. Both used
-    # mu_consensus_corr (a forecast-derived value) which violated the bot's
-    # nn_match-only edge thesis. PRESCREEN['skip_unless_nn_match']=True
-    # (shipped 2026-05-18) had already been blocking them at the trade layer;
-    # this delete is the structural cleanup so future sessions don't try to
-    # repair a code path the bot will never dispatch. If nn_match returns
-    # None, mu/mu_method stay on the consensus_median/best_mae forecast path
-    # below — that path is also blocked by skip_unless_nn_match, but is
-    # retained because it's the diagnostic μ field downstream tooling reads.
+    # 2026-05-16 (ACTION D): Anchored μ — obs-derived primary anchor.
+    # Backtest (V2 max n=394, 6 days): anchored 77.9% acc / MAE 1.12 / bias
+    # -0.01 vs v2_blended 73.1% / 1.14 / -0.57. The anchored formula uses
+    # forecast consensus as a prior and shifts it by today's obs vs the
+    # expected pace-based trajectory:
+    #   μ_anchored = consensus_corr + (rm − consensus_corr × pace_median)
+    # Only valid when pace_median ∈ [0.7, 1.0] (mid-afternoon for HIGH,
+    # late-cooling for LOW). Below 0.7, pace projection diverges (small
+    # denominator amplifies noise). HIGH-only for now — LOW pace semantics
+    # differ and need separate validation (backlog).
+    #
+    # PHYSICAL FLOOR: peak ≥ current rm for HIGH (can't drop). Caps anchored
+    # at rm when bias-corrections push consensus below rm. KMSP 2026-05-16
+    # case had consensus 77.56 with rm 78.0 → without floor, anchored
+    # would be 77.5; with floor it's 78.0 (rm itself = no-further-climb
+    # estimate).
+    # Only run anchored/rm_ceiling when nn_match did not produce a μ.
+    if (not (_nn_res and _nn_res.get("mu") is not None) and is_high
+            and rm_for_mu is not None and pmed_for_mu is not None
+            and mu_consensus_corr is not None):
+        try:
+            mu_anchored = mu_consensus_corr + (float(rm_for_mu) - mu_consensus_corr * pmed_for_mu)
+            # Physical floor: HIGH peak ≥ rm.
+            if float(rm_for_mu) > mu_anchored:
+                mu_anchored = float(rm_for_mu)
+                anchor_floored = True
+            else:
+                anchor_floored = False
+            mu = mu_anchored
+            mu_method = (f"anchored (pace_med={pmed_for_mu:.3f}, rm={rm_for_mu:.1f}"
+                         + (", floored_at_rm" if anchor_floored else "") + ")")
+        except (TypeError, ValueError):
+            pass  # keep existing mu
+
+    # 2026-05-16: LOW-side anchored via rm-ceiling. Backtest on paper_min_bot
+    # n=26 settled positions: MAE 0.73°F vs old_mu 1.95°F (2.7x improvement),
+    # p95 2.0°F vs 4.1°F. Logic: by the time LOW d+0 is evaluated (pre-dawn
+    # 1.5-5.5 local OR late-evening 22-24 local), cooling is mostly complete
+    # — rm ≈ day_min already. So cap consensus at rm (day_min can't be ABOVE
+    # what's been observed today). When rm ≥ consensus, keep consensus (more
+    # cooling expected).
+    #
+    # Gated on pace_low_median ≥ 0.7 to avoid early-evening cases where rm
+    # hasn't yet approached day_min. KMSP-style metar stations + standard
+    # ASOS both well-behaved in this regime.
+    # Skip when nn_match already produced a μ.
+    elif (not (_nn_res and _nn_res.get("mu") is not None) and is_low
+            and rm_for_mu is not None and pmed_for_mu is not None
+            and mu_consensus_corr is not None):
+        try:
+            cons_v = float(mu_consensus_corr)
+            rm_v = float(rm_for_mu)
+            if cons_v > rm_v:
+                mu = rm_v
+                mu_method = (f"low_rm_ceiling (pace_low_med={pmed_for_mu:.3f}, "
+                             f"consensus {cons_v:.1f} > rm {rm_v:.1f})")
+            # else: consensus ≤ rm — more cooling expected, keep consensus
+        except (TypeError, ValueError):
+            pass
 
     # σ — match LLM prompt Step 4: σ = 1.25 × MAE.
     # 1.25 converts MAE → Gaussian stddev (MAE = σ·√(2/π) ≈ 0.798·σ, so
@@ -1368,6 +1482,61 @@ def _is_rm_locked_for_side(packet: dict) -> tuple[bool, str]:
     return (False, "unknown_series_or_side")
 
 
+def _margin_outside_yes_f(
+    mu: Optional[float],
+    floor: Optional[float],
+    cap: Optional[float],
+    bracket_kind: Optional[str],
+    side: Optional[str],
+) -> Optional[float]:
+    """Signed distance from μ to the nearest YES-window edge, in °F.
+
+    Returns a value where:
+      > 0  μ is outside the YES window in the direction that SUPPORTS `side`
+      < 0  μ is inside the YES window (or outside in the wrong direction)
+      None if required fields are missing
+
+    B-bracket YES window: [floor − 0.5, cap + 0.5].
+    T-warm (cap=None): YES if x > floor + 0.5.
+    T-cold (floor=None): YES if x < cap − 0.5.
+    """
+    if mu is None or bracket_kind is None or side is None:
+        return None
+    if bracket_kind == "B":
+        if floor is None or cap is None:
+            return None
+        yes_lo = floor - 0.5
+        yes_hi = cap + 0.5
+        if side == "BUY_NO":
+            # NO wins when peak < yes_lo (undershoot) OR peak > yes_hi (overshoot)
+            if mu < yes_lo:
+                return yes_lo - mu       # μ supports undershoot
+            if mu > yes_hi:
+                return mu - yes_hi       # μ supports overshoot
+            # μ inside YES — distance to nearest edge, but in the WRONG direction
+            return -min(mu - yes_lo, yes_hi - mu)
+        if side == "BUY_YES":
+            if yes_lo <= mu <= yes_hi:
+                # μ inside YES; the deeper inside, the higher the confidence
+                return min(mu - yes_lo, yes_hi - mu)
+            # μ outside YES — supports NO, against YES
+            return -min(abs(yes_lo - mu), abs(mu - yes_hi))
+    elif bracket_kind == "T":
+        if floor is not None and cap is None:
+            yes_edge = floor + 0.5
+            if side == "BUY_NO":
+                return yes_edge - mu     # >0 when μ below YES line
+            if side == "BUY_YES":
+                return mu - yes_edge
+        if cap is not None and floor is None:
+            yes_edge = cap - 0.5
+            if side == "BUY_NO":
+                return mu - yes_edge     # >0 when μ above YES line
+            if side == "BUY_YES":
+                return yes_edge - mu
+    return None
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Pre-screen (numerical filters before LLM call) — applied during entry loop
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1442,18 +1611,18 @@ def prescreen(packet: dict) -> Optional[str]:
             return (f"edge {edge_info['edge']:+.2f} on {edge_info['side']} "
                     f"< {p.get('min_numerical_edge', 0.10):.2f}")
 
-        # 2026-05-17: forecast-only μ gate. When nn_match doesn't fire, the
+        # 2026-05-17: forecast-only μ gate. When neither nn_match nor the
+        # rm-anchored methods (anchored / low_rm_ceiling) produced a μ, the
         # bot would otherwise fall to a pure-forecast μ (best_mae_*, consensus_
         # median, raw_median). The bot's stated edge is observations; trading
         # on forecast-only μ is taking publicly priced signal as edge. See
         # config.PRESCREEN["skip_forecast_only_mu"] for backtest rationale.
         # 2026-05-18: STRICTER successor — skip_unless_nn_match blocks
-        # EVERY non-nn_match μ. When skip_unless_nn_match is True it
-        # supersedes skip_forecast_only_mu.
-        # 2026-05-19: anchored / low_rm_ceiling branches deleted (they were
-        # the cases that motivated skip_unless_nn_match's strictness). The
-        # gate itself remains as defense-in-depth against any future
-        # non-nn_match μ source that gets reintroduced.
+        # EVERY non-nn_match μ (also catches `anchored` + `low_rm_ceiling`,
+        # which the LLM was BUYing 100% of the time in violation of the
+        # prompt's "nn_match-only" SKIP rule). Live data 48h: 3/3
+        # low_rm_ceiling dispatches → 3 rule-violating BUYs. When
+        # skip_unless_nn_match is True it supersedes skip_forecast_only_mu.
         mm = edge_info.get("mu_method") or ""
         if p.get("skip_unless_nn_match", False):
             if not mm.startswith("nn_match"):
@@ -1463,6 +1632,50 @@ def prescreen(packet: dict) -> Optional[str]:
                     or mm.startswith("consensus_median")
                     or mm.startswith("raw_median")):
                 return f"forecast-only μ ({mm[:40]}) — no obs-anchored projection"
+
+        # 2026-05-19: μ-margin filter. Block trades where the bot's projection
+        # is too close to (or inside) the YES window for the chosen side to
+        # be a confident bet. Live failure that motivated this:
+        #   KXHIGHPHIL-26MAY18-B96.5  BUY_NO @ 35c × 11  →  settled YES, lost $3.85
+        #   μ=96.3, σ=2.10, YES=[95.5, 97.5], margin = -0.20  (μ INSIDE YES)
+        # Backtest n=28 (5/16-5/18): baseline -$44.60 → filtered (k=1.5/1.0,
+        # σ≤2.5) +$16.88. rm-lock bypasses (physical settlement). See
+        # config.PRESCREEN["margin_*"] for thresholds + rationale.
+        if p.get("margin_filter_enabled", False):
+            sigma = packet.get("sigma_chosen") or packet.get("sigma")
+            mu = packet.get("mu_chosen")
+            side = edge_info.get("side")
+            margin = _margin_outside_yes_f(
+                mu,
+                packet.get("floor"),
+                packet.get("cap"),
+                packet.get("bracket_kind"),
+                side,
+            )
+            if (sigma is not None and margin is not None
+                    and isinstance(sigma, (int, float))
+                    and isinstance(margin, (int, float))):
+                # σ cap (independent of margin)
+                sig_max = p.get("margin_max_sigma_f")
+                if sig_max is not None and sigma > sig_max:
+                    locked, _ = (_is_rm_locked_for_side(packet)
+                                 if p.get("margin_filter_bypass_when_rm_locked", True)
+                                 else (False, ""))
+                    if not locked:
+                        return (f"σ {sigma:.2f}°F > {sig_max:.2f}°F cap "
+                                f"(uncertainty too wide for confident bracket bet)")
+                # margin-vs-σ check
+                k = (p.get("margin_k_sigma_buy_no", 1.5) if side == "BUY_NO"
+                     else p.get("margin_k_sigma_buy_yes", 1.0))
+                required = k * sigma
+                if margin < required:
+                    locked, _ = (_is_rm_locked_for_side(packet)
+                                 if p.get("margin_filter_bypass_when_rm_locked", True)
+                                 else (False, ""))
+                    if not locked:
+                        return (f"margin {margin:+.2f}°F < {k:.1f}σ "
+                                f"({required:.2f}°F) for {side}; μ too close to "
+                                f"YES window for confident bet")
 
     # ── 2026-05-16: RULE #2 — EV gap ceiling (extracted from prompt Step 10) ──
     # When market disagrees with our model by >60pp, market is likely right
@@ -1839,7 +2052,13 @@ def _claude_prob_for_side(decision: "judgment.EntryDecision", packet: dict,
     decision_kind = "BUY_NO" if side == "no" else "BUY_YES"
     _, p = _extract_prob_from_read(decision.read, prefer_side=decision_kind)
     if p is not None:
-        return p, "claude_read"
+        # 2026-05-20: push pure-nn worker builds a synthetic EntryDecision whose
+        # read string starts with 'pure-nn auto:' and embeds 'P(YES)=X.XX' from
+        # the NN strategy — the regex above will match that literal, but it is
+        # the NN-derived probability, not a Claude call. Distinguish the source.
+        read_txt = decision.read or ""
+        source = "nn_read" if read_txt.startswith("pure-nn auto") else "claude_read"
+        return p, source
     ei = packet.get("_edge_info") or {}
     bot_prob = ei.get("prob")
     if bot_prob is None:
@@ -2697,6 +2916,38 @@ def run_entry_loop(rt: Runtime) -> None:
                  "(kept best-edge per (station, side, date))", n_dropped)
         rejection_counts["dedupe: sibling bracket lower-edge"] = n_dropped
     survivors = deduped
+
+    # 2026-05-19: LLM dispatch gating for push pure-code architecture.
+    # config.LLM_DISPATCH_MODE values:
+    #   "off"      — push worker handles all BUYs; LLM never dispatched
+    #   "yes_only" — push handles BUY_NO; LLM dispatched only on BUY_YES
+    #   "all"      — legacy behavior (every survivor → LLM)
+    _llm_mode = getattr(config, "LLM_DISPATCH_MODE", "all")
+    if _llm_mode in ("off", "yes_only"):
+        kept = []
+        for (cand, packet, cand_rec) in survivors:
+            ei = packet.get("_edge_info") or {}
+            best_side = ei.get("side") or ""
+            if _llm_mode == "off":
+                # Skip ALL LLM dispatches — push owns the trading path.
+                cand_rec["verdict"] = "skip_llm_dispatch_off"
+                cand_rec["verdict_reason"] = "LLM_DISPATCH_MODE=off (push owns trades)"
+                state.log_candidate(cand_rec)
+                rejection_counts["llm_dispatch: mode=off"] += 1
+            elif _llm_mode == "yes_only":
+                if best_side == "BUY_NO":
+                    cand_rec["verdict"] = "skip_llm_dispatch_yes_only"
+                    cand_rec["verdict_reason"] = "LLM_DISPATCH_MODE=yes_only (push owns BUY_NO)"
+                    state.log_candidate(cand_rec)
+                    rejection_counts["llm_dispatch: mode=yes_only BUY_NO"] += 1
+                else:
+                    kept.append((cand, packet, cand_rec))
+        if _llm_mode == "off":
+            survivors = []
+        else:  # yes_only
+            survivors = kept
+        log.info("LLM dispatch gate: mode=%s, %d survivors after gate",
+                 _llm_mode, len(survivors))
 
     log.info(
         "entry loop pre-screen results: %d survivors out of %d candidates",
@@ -4062,6 +4313,21 @@ def one_cycle(rt: Runtime) -> None:
             kalshi_ws.subscribe(list(rt.positions.keys()))
         except Exception as _ws_pe:
             log.warning("kalshi_ws.subscribe (positions) failed: %s", _ws_pe)
+    # 2026-05-19 push pure-code arch v2: also subscribe the FULL candidate
+    # universe so push-side auto-execute receives BBO events for every
+    # weather market (not just owned positions). Previously this happened
+    # inside run_entry_loop; with LLM_DISPATCH_MODE=off we skip that loop
+    # so we do it here unconditionally. Idempotent. kalshi_ws.subscribe
+    # is a no-op for already-subscribed tickers.
+    if USE_KALSHI_WS:
+        try:
+            _universe = market_universe.list_candidates()
+            if _universe:
+                kalshi_ws.subscribe([c.ticker for c in _universe])
+                log.info("cycle %d: subscribed %d candidate tickers (universe)",
+                         rt.cycles, len(_universe))
+        except Exception as _ws_ue:
+            log.warning("universe subscribe failed: %s", _ws_ue)
     # Wethr_rm degraded check — if wethr.net is down, halt trading and alert.
     if wethr_rm.is_degraded():
         mins = wethr_rm.degraded_seconds() / 60
@@ -4094,18 +4360,27 @@ def one_cycle(rt: Runtime) -> None:
     except Exception:
         log.exception("settlement resolver error")
 
-    buys_at_start = rt.cycle_buys_count
-    try:
-        run_entry_loop(rt)
-    except Exception:
-        log.exception("entry loop error")
-    cycle_elapsed = time.time() - cycle_start
-    new_buys = rt.cycle_buys_count - buys_at_start
-    discord_send(
-        f"✅ cycle {rt.cycles} done in {cycle_elapsed:.0f}s — "
-        f"{new_buys} new BUY(s), {rt.ctx.open_positions_count} positions, "
-        f"day spend ${rt.ctx.daily_spend_usd:.2f}/${config.GUARDRAILS['daily_spend_cap_usd']:.0f}"
-    )
+    # 2026-05-19 push pure-code arch v2: when LLM is off, push owns trades.
+    # Skip the heavy entry loop AND the loud Discord cycle-done post — main
+    # cycle becomes quiet maintenance only (reconcile + settlements +
+    # hourly summary), still ticking every EXIT_CYCLE_SEC (120s).
+    _llm_mode = getattr(config, "LLM_DISPATCH_MODE", "all")
+    if _llm_mode == "off":
+        log.info("cycle %d: LLM_DISPATCH_MODE=off — entry loop skipped (push owns)",
+                 rt.cycles)
+    else:
+        buys_at_start = rt.cycle_buys_count
+        try:
+            run_entry_loop(rt)
+        except Exception:
+            log.exception("entry loop error")
+        cycle_elapsed = time.time() - cycle_start
+        new_buys = rt.cycle_buys_count - buys_at_start
+        discord_send(
+            f"✅ cycle {rt.cycles} done in {cycle_elapsed:.0f}s — "
+            f"{new_buys} new BUY(s), {rt.ctx.open_positions_count} positions, "
+            f"day spend ${rt.ctx.daily_spend_usd:.2f}/${config.GUARDRAILS['daily_spend_cap_usd']:.0f}"
+        )
 
     # Hourly summary — replaces the older heartbeat. Posts every
     # HOURLY_SUMMARY_SEC with cycle activity + wallet state.
@@ -4168,8 +4443,13 @@ def main() -> int:
         # 2026-05-16 cleanup: per-station scan for HIGH/LOW windows was dead
         # since the 2026-05-15 token-saving consolidation set both ENTRY_CYCLE_SEC
         # and PEAK_CYCLE_SEC to 900s — the scan always returned the same value.
-        # If distinct cadences are reintroduced later, restore the scan.
-        cycle_target = config.ENTRY_CYCLE_SEC
+        # 2026-05-19 push v2: when LLM is off, push owns trades and cycle is
+        # maintenance-only (reconcile + settlements + hourly). Drop sleep
+        # down to EXIT_CYCLE_SEC so position state stays fresh.
+        if getattr(config, "LLM_DISPATCH_MODE", "all") == "off":
+            cycle_target = int(getattr(config, "EXIT_CYCLE_SEC", 120))
+        else:
+            cycle_target = config.ENTRY_CYCLE_SEC
         sleep_sec = max(1.0, cycle_target - elapsed)
         log.info("cycle done in %.0fs, sleeping %.0fs (next %ds)",
                  elapsed, sleep_sec, cycle_target)
