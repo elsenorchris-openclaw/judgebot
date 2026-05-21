@@ -16,13 +16,37 @@ local copies are stale (CLAUDE.md RULE #0.7).
 | 18-dim conditional-MAE backtest (v3) | ✅ done (2000-2025, 3.17M rows) |
 | `push_window_overrides.py` — 480/480 windows + bias + mae | ✅ SHIPPED `cc11a38` + `6aa2f51` |
 | Windows live in bot | ✅ (`_in_decision_window` reads `ov[0]/ov[1]`) |
-| MAE + bias logged per decision → `shadow_nn_strategy.jsonl` | ✅ (observability only) |
-| **Bias applied to μ** | ❌ Phase 2 |
-| **MAE-based sizing** | ❌ Phase 2 (collect-then-validate) |
-| **22 conditional regime entries used** | ❌ Phase 2 (needs runtime bucketing) |
-| **Low-confidence (37 cells) conservative handling** | ❌ Phase 2 |
+| Out-of-sample validation of bias + MAE | ✅ done 2026-05-21 (see §4a) |
+| **MEDIAN-bias applied to μ — HIGH only** | ✅ SHIPPED `USE_PUSH_BIAS_CORRECTION` |
+| **MAE-based confidence sizing** | ✅ SHIPPED `USE_PUSH_MAE_SIZING` |
+| MEAN-bias application | ⛔ REJECTED (−8.6% holdout — never ship) |
+| **22 conditional regime entries used** | ❌ Phase 3 (needs runtime bucketing) |
+| **Low-confidence (37 cells) conservative handling** | ❌ Phase 3 |
 
-Current bot PID at last restart: 890258 (changes whenever restarted).
+Bias field in the override file is now the **MEDIAN** residual (patched by
+`tools/per_hour_quality/patch_median_bias.py` after the generator). Current bot
+PID changes whenever restarted.
+
+### §4a. Out-of-sample validation (2026-05-21) — READ BEFORE TOUCHING BIAS
+
+Validated train(2000-23)→holdout(2024-25) on the `phq_raw_*.csv.gz` sidecars,
+473 cells / 79,248 pre-peak in-window holdout decisions:
+
+- **MEAN bias correction: −8.6% (WORSE).** Holdout MAE 2.19→2.38°F; 313 cells
+  worse. ⛔ NEVER ship `mu -= mean_bias`. Root cause: error distribution is
+  skewed — the mean is inflated by extreme cold-snap outliers, the typical
+  (median) error is ~0, so subtracting the mean over-corrects. (Same lesson as
+  the 2026-05-18 LOW bias work: MAE is minimized at the **median**, not mean.)
+- **MEDIAN bias correction: +0.4% overall, +2.1% HIGH (159/235 cells), LOW
+  neutral (−0.1%).** → SHIPPED HIGH-only. Modest but real and safe. The override
+  file's bias field is the median; `_evaluate_ticker` applies it for HIGH only.
+- **MAE sizing signal: VALIDATED.** corr(train_mae, holdout_mae)=0.62; monotonic
+  tiers (uncorrected holdout MAE): train<1.0→1.32°F, 1.0-1.5→1.60, 1.5-2.5→1.78,
+  ≥2.5→2.96. → SHIPPED: bet size scales by MAE tier (only reduces).
+
+**Takeaway: the bias was NOT the big lever it looked like — it's marginal
+(+2.1% HIGH). MAE-based sizing is the more useful validated signal.** Scripts:
+`/tmp/validate_bias_mae.py`, `/tmp/validate_median_bias.py` on VPS.
 
 ---
 

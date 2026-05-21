@@ -520,6 +520,24 @@ USE_PUSH_WINDOW_OVERRIDES: bool = True
 USE_FRACTIONAL_PEAK_FOR_WINDOW: bool = True
 PUSH_PEAK_FRACTIONAL_PATH: str = "/home/ubuntu/data/peak_fractional_5yr_10day.json"
 
+# 2026-05-21: per-cell MEDIAN bias correction (HIGH only) + MAE-based confidence
+# sizing. Both consume push_window_overrides 4-tuples (before, after, bias, mae)
+# and apply in nn_shadow_worker._evaluate_ticker. Out-of-sample validated
+# 2026-05-21 (train→2024-25 holdout, 79,248 decisions): median-bias −2.1% HIGH
+# MAE (159/235 cells; LOW neutral −0.1% → excluded; the MEAN bias was −8.6%
+# WORSE due to skewed errors, so the override file ships MEDIAN). Cell MAE
+# predicts holdout accuracy (corr 0.62, monotonic tiers) → scale bet down where
+# the matcher is less reliable (only ever reduces size = risk-reducing).
+USE_PUSH_BIAS_CORRECTION: bool = True   # subtract cell median-bias from μ (HIGH only)
+USE_PUSH_MAE_SIZING: bool = True        # scale bet by MAE-confidence tier
+# (mae_lo, mae_hi, size_multiplier). mae=None → 0.5 (unknown/fallback).
+PUSH_MAE_CONF_TIERS: list = [
+    (0.0, 1.0, 1.0),     # <=1F MAE: full size (settles ~1.3F)
+    (1.0, 1.5, 0.75),
+    (1.5, 2.5, 0.5),
+    (2.5, 99.0, 0.3),    # >=2.5F MAE: minimal (settles ~3F)
+]
+
 # Minimum edge_pp (percentage-points of P(direction) − market_implied) for
 # nn_shadow_strategy.pure_nn_decide to fire. Default in the function is 6pp;
 # we raise to 12pp based on 2026-05-20 backtest on n=196 trades (166 settled

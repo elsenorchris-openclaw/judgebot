@@ -349,6 +349,31 @@ def _lookup_push_override(station: str, series: str,
         return None
 
 
+def _mae_conf_mult(mae) -> float:
+    """Confidence/sizing multiplier from a cell's expected pre-peak MAE (°F).
+    Lower MAE = more reliable matcher = full size; higher MAE = scale down.
+    ONLY reduces size (never increases) → risk-reducing. mae=None (no override
+    / fallback) → moderate 0.5. Tiers in config.PUSH_MAE_CONF_TIERS.
+
+    Out-of-sample validated (2026-05-21): cell MAE predicts holdout accuracy
+    (corr 0.62, monotonic tiers train<1.0→1.32°F .. ≥2.5→2.96°F)."""
+    if mae is None:
+        return 0.5
+    tiers = getattr(_cfg, "PUSH_MAE_CONF_TIERS", None)
+    if tiers:
+        for lo, hi, mult in tiers:
+            if lo <= mae < hi:
+                return float(mult)
+        return float(tiers[-1][2])
+    if mae < 1.0:
+        return 1.0
+    if mae < 1.5:
+        return 0.75
+    if mae < 2.5:
+        return 0.5
+    return 0.3
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Per-station decision-window check (auto-execute gate)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -955,6 +980,22 @@ def _evaluate_ticker(ticker: str, trigger: str) -> None:
         pkt["mu_chosen"] = nn_res["mu"]
         pkt["sigma_chosen"] = nn_res["sigma"]
 
+        # 2026-05-21: per-cell MEDIAN bias correction, HIGH only. Out-of-sample
+        # validation: median-bias cut HIGH holdout MAE −2.1% (159/235 cells),
+        # LOW neutral (−0.1%) → LOW excluded. The MEAN bias was −8.6% WORSE
+        # (skewed errors) and is NOT used (the override file ships median). The
+        # residual is additive on top of the matcher's internal bias-corr, so
+        # subtract it so edge/p_yes downstream reflect the calibrated μ.
+        # Gated by USE_PUSH_BIAS_CORRECTION; raw μ kept in mu_pre_bias.
+        if (getattr(_cfg, "USE_PUSH_BIAS_CORRECTION", False)
+                and cand.series_prefix == "KXHIGH"):
+            _po = pkt.get("push_override")
+            if _po and _po.get("bias") is not None:
+                _raw = pkt["mu_chosen"]
+                pkt["mu_chosen"] = round(_raw - float(_po["bias"]), 3)
+                pkt["mu_pre_bias"] = round(_raw, 3)
+                pkt["bias_applied"] = round(float(_po["bias"]), 3)
+
         # Per-series bet cap — single source of truth is the GUARDRAILS dict
         # (guardrails.check_buy enforces the same numbers downstream; sizing
         # here must match or guardrails would REJECT an over-cap bet outright).
@@ -978,6 +1019,20 @@ def _evaluate_ticker(ticker: str, trigger: str) -> None:
                     ticker_remaining = max(0.0, _series_cap_usd - existing_cost)
             except Exception:
                 pass
+
+        # 2026-05-21: MAE-based confidence sizing. A cell's historical pre-peak
+        # MAE predicts its out-of-sample accuracy (corr 0.62, monotonic), so
+        # scale the bet DOWN where the matcher is less reliable. Only ever
+        # reduces size (never increases) → risk-reducing. Gated by
+        # USE_PUSH_MAE_SIZING; conf_mult logged. Note: for LOW (small cap) a low
+        # multiplier can drop the bet below min_buy → that cell simply skips,
+        # which is the intended "don't trade where unreliable" behavior.
+        _conf_mult = 1.0
+        if getattr(_cfg, "USE_PUSH_MAE_SIZING", False):
+            _po = pkt.get("push_override")
+            _conf_mult = _mae_conf_mult(_po.get("mae") if _po else None)
+            ticker_remaining *= _conf_mult
+        pkt["mae_conf_mult"] = round(_conf_mult, 3)
 
         # 2026-05-18 (Chris): shadow logs EVERY positive-edge candidate, no
         # 25pp ceiling. Whole point of the shadow is to figure out which
@@ -1042,11 +1097,13 @@ def _evaluate_ticker(ticker: str, trigger: str) -> None:
             # 2026-05-19: obs/wethr signals for post-hoc BUY_YES filter discovery.
             # Pure additive — pure_nn_decide does NOT use these yet.
             "signals": _signals_block(pkt),
-            # 2026-05-21: matched push override {before,after,bias,mae,src}.
-            # mae = cell's expected pre-peak accuracy (°F) — logged as a
-            # confidence/sizing signal for later analysis (bias/mae not yet
-            # applied to the decision; that's Phase 2).
+            # 2026-05-21: matched push override {before,after,bias,mae,src} +
+            # how it was APPLIED. mu_pre_bias = raw matcher μ before HIGH-only
+            # median-bias; mae_conf_mult = MAE-based bet-size multiplier.
             "push_override": pkt.get("push_override"),
+            "mu_pre_bias": pkt.get("mu_pre_bias"),
+            "bias_applied": pkt.get("bias_applied"),
+            "mae_conf_mult": pkt.get("mae_conf_mult"),
             "decision": decision["decision"],
             "side": decision["side"],
             "edge_pp": round(decision["edge"] * 100, 2) if decision.get("edge") is not None else None,

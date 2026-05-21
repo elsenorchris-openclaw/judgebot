@@ -4,6 +4,34 @@ A judgment-first Kalshi trading bot for daily weather markets. Claude is the
 entry+exit decision-maker; deterministic guardrails wrap the LLM so the
 worst-case blast radius is bounded by code, not by prompt quality.
 
+## Push override: HIGH median-bias + MAE confidence-sizing — 2026-05-21
+
+Out-of-sample validation (train 2000-23 → holdout 2024-25, 79,248 decisions)
+turned the dormant `bias`/`mae` override fields into two live levers in
+`nn_shadow_worker._evaluate_ticker`:
+
+- **MEAN-bias correction was REJECTED** — applying `μ −= mean_bias` made holdout
+  MAE 8.6% WORSE (errors are skewed; the mean is outlier-inflated, the median
+  error is ~0, so subtracting the mean over-corrects). The override file's bias
+  field is now the **MEDIAN** residual (`patch_median_bias.py`).
+- **MEDIAN-bias correction, HIGH only** (`USE_PUSH_BIAS_CORRECTION`): −2.1% HIGH
+  holdout MAE (159/235 cells); LOW was neutral so it's excluded. `μ −= bias`
+  after the matcher sets μ, before `pure_nn_decide`, so edge/p_yes use the
+  calibrated μ. Raw μ kept in `mu_pre_bias`.
+- **MAE confidence-sizing** (`USE_PUSH_MAE_SIZING`): a cell's expected MAE
+  predicts its out-of-sample accuracy (corr 0.62, monotonic), so bet size scales
+  down where the matcher is less reliable — `PUSH_MAE_CONF_TIERS` (≤1°F→1.0x,
+  1-1.5→0.75x, 1.5-2.5→0.5x, ≥2.5→0.3x; None→0.5x). Only ever reduces size
+  (risk-reducing). `mae_conf_mult` logged per decision.
+
+Honest framing: the bias turned out **marginal** (+2.1% HIGH only), not the big
+lever it first appeared — MAE-based sizing is the more useful validated signal.
+Both gated, both logged, both reversible via their flags. Verified live: HIGH
+decisions carry `bias_applied`, LOW do not; `mae_conf_mult` on all.
+Backups `nn_shadow_worker.py.pre_biassize_20260521`, `config.py.pre_biassize_20260521`,
+`push_window_overrides.py.pre_medianbias_20260521`. Full context:
+`PUSH_OVERRIDES_PLAN.md` §4a.
+
 ## Push window overrides — full 480/480 coverage + per-cell bias — 2026-05-21 13:50 UTC
 
 Regenerated `push_window_overrides.py` from the corrected 18-dimension
