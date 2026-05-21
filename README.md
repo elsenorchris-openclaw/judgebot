@@ -4,6 +4,83 @@ A judgment-first Kalshi trading bot for daily weather markets. Claude is the
 entry+exit decision-maker; deterministic guardrails wrap the LLM so the
 worst-case blast radius is bounded by code, not by prompt quality.
 
+## In-bracket tail-bet gate (Gate 2) — 2026-05-20
+
+The pure-nn push path now raises the edge floor for a structurally-doomed
+trade shape: when the nn `mu_chosen` sits INSIDE the YES window
+`[floor-0.5, cap+0.5)` but the bot picks the smaller-mass (tail) side
+(`p_chosen < 0.5`), it is betting against its own central estimate for a thin
+edge. There is no weather regime where "I think it lands in the bracket, but
+I'll bet it doesn't" is systematically a winning play.
+
+**Gate** (`nn_shadow_worker._try_auto_execute`, folded into the edge-floor
+check): for a candidate where `mu_chosen ∈ YES window` and the chosen side's
+probability `< 0.5`, require `edge >= PUSH_TAIL_BET_MIN_EDGE_PP` (default 25pp)
+instead of the base `PUSH_MIN_EDGE_PP` (12pp). Skip reason: `edge_below_floor …
+(tail_bet mu_in_YES p_chosen=…)`. The YES window is computed per bracket shape
+(mirrors `nn_shadow_strategy._yes_window`): B = `[floor-0.5, cap+0.5)`,
+T-warm (floor only) = `[floor+0.5, +inf)`, T-cold (cap only) = `(-inf, cap-0.5)`.
+
+**2026-05-20 extension — T-brackets:** originally B-only; extended to T-brackets
+after **HOU T84 BUY_NO** (mu=83.0 sat in the T-cold YES region `< 83.5`, bot bet
+the NO tail at p_chosen=0.41) slipped past the B-only gate and lost -$5.16.
+
+**Backtest** (5/19+5/20 settled pure-nn pool, the full push-arch history at
+ship time): B-only version blocked 4 (CHI B80.5, LAX B73.5, PHIL B71.5, PHIL
+B95.5), 4 losers, **0 winners killed**, +$13.87. The T extension additionally
+catches HOU T84 (-$5.16). Mechanism is clean — unlike the sibling **boundary-gap
+gate (Gate 1, PARKED)** which on the same pool blocked 14 trades but killed 3
+real winners (DAL +$9.75, SFO +$2.97, DEN +$3.52) because near-edge calls are
+genuine coin-flips. Gate 1 may return with a trend-aware carve-out once more
+settled data exists.
+
+**Tests:** `tests/test_push_tail_bet_gate.py` — 10 tests pinning trigger
+(mu-in-YES + tail side + edge below floor for B and T brackets), non-trigger
+(majority side, mu outside bracket/region), base-floor independence, disable.
+
+**Rollback:** `PUSH_TAIL_BET_MIN_EDGE_PP = 0` in config.py and restart.
+**Backups:** `config.py.pre_tail_bet_gate_20260520`,
+`nn_shadow_worker.py.pre_tail_bet_gate_20260520` (B-only),
+`*.pre_hicap_tbracket_20260521` (T-extension + HIGH cap raise).
+
+## HIGH-series bet cap raised $5 → $15 — 2026-05-20
+
+`GUARDRAILS.max_bet_high_series_usd` raised `5.0 → 15.0` (Chris directive). HIGH
+is the profitable book (5/20: HIGH +$40.29 vs LOW −$24.23), so bet size leans
+into it. `max_bet_yes_usd` also raised `10.0 → 15.0` so HIGH BUY_YES can reach
+$15 — guardrails *rejects* (not truncates) over-cap bets, so the old $10 YES cap
+would have killed $15-sized HIGH YES entries. LOW BUY_YES is unaffected (still
+capped at $5 by `max_bet_low_series_usd`). The push sizing in
+`nn_shadow_worker` now reads `max_bet_high_series_usd` / `max_bet_low_series_usd`
+from `GUARDRAILS` as the single source of truth and passes them to
+`pure_nn_decide` so the qty is sized to match the cap. Verified: HIGH NO/YES
+size to ~$14.8, LOW stays ~$5.
+
+**Risk note:** this 3× HIGH sizing also 3×'s the downside on a bad HIGH day.
+**Rollback:** set `max_bet_high_series_usd = 5.0` (and optionally
+`max_bet_yes_usd = 10.0`) in `config.py` GUARDRAILS and restart.
+
+## LOW-series bet cap cut $5 → $1 — 2026-05-21
+
+`GUARDRAILS.max_bet_low_series_usd` cut `5.0 → 1.0` (Chris directive). LOW is
+the losing book (5/20: LOW −$24.23 vs HIGH +$40.29) — shrink exposure to a
+token size while the nn LOW projector keeps misfiring (tight σ, high stated
+edge, frequent misses; see the LOW BUY_YES −$19.58 cohort).
+
+**Min-buy gotcha (and fix):** a $1 cap with the default $1 `min_buy_usd`
+recreates the 2026-05-17 integer-contract collapse — when `min_buy == cap`, no
+integer qty satisfies both `cost ≥ $1 floor` and `cost ≤ $1 cap` except at
+exact-divisor prices (50c, 25c, 20c), so nearly all LOW buys would silently
+skip. Fix: new `PUSH_MIN_BUY_USD_LOW = 0.40`; the push worker passes it as the
+LOW min-buy into `pure_nn_decide` so LOW places genuine ~$0.40–$1.00 bets
+across the price range (verified: 34c→$0.68, 50c→$1.00, 70c→$0.70, 79c→$0.79).
+HIGH keeps the standard $1 min-buy (its $15 cap never binds on min-buy).
+
+**Rollback:** set `max_bet_low_series_usd = 5.0` in `config.py` GUARDRAILS
+(and optionally `PUSH_MIN_BUY_USD_LOW = 1.0`) and restart.
+**Backups:** `config.py.pre_lowcap1_20260521`,
+`nn_shadow_worker.py.pre_lowcap1_20260521`.
+
 ## Tier 1 push-buy runtime gates (vsby + wind) — 2026-05-20 20:09 UTC
 
 The pure-nn push path now skips buys when wethr_obs reports a

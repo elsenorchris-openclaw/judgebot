@@ -369,17 +369,29 @@ GUARDRAILS = {
     # cheap YES with low payoff hits cost-full when wrong, V1/V2 numerical
     # bots have learned to size YES smaller for the same reason).
     "max_bet_no_usd": 30.0,
-    "max_bet_yes_usd": 10.0,
+    # 2026-05-20: raised 10 -> 15 so HIGH-series BUY_YES can reach the new $15
+    # HIGH cap (guardrails REJECTS, not truncates, when cost > side_cap, so a
+    # $15-sized HIGH YES would otherwise be killed by the old $10 YES cap).
+    # LOW BUY_YES is unaffected — it stays capped at $5 by max_bet_low_series_usd.
+    "max_bet_yes_usd": 15.0,
     # 2026-05-16: HIGH-series brackets (KXHIGH-*) capped tighter after a string
     # of forecast-anchored BUY_NO losses (HOU B88.5, MIN B80.5, NY B78.5, LV B95.5).
-    # User directive: lower max bet on HIGH series to $5 while keeping LOW at $30/$10.
     # Applied as min(side_cap, high_series_cap) when ticker starts with "KXHIGH".
-    "max_bet_high_series_usd": 5.0,
+    # 2026-05-20: raised 5 -> 15 (Chris directive). HIGH is the profitable book
+    # (+$40 on 5/20 vs LOW -$24); lean bet size into it. pure_nn_decide sizing
+    # reads this same value via the worker so qty is sized to match the cap.
+    "max_bet_high_series_usd": 15.0,
     # 2026-05-16 (evening): LOW-series brackets (KXLOW-*) capped at $5 alongside
     # HIGH while validating the nn_match k-NN heating-curve projector as the
     # primary μ source. Symmetric to max_bet_high_series_usd; applied at
     # fresh-buy sizing AND check_buy validation.
-    "max_bet_low_series_usd": 5.0,
+    # 2026-05-21: LOW cut $5 -> $1 (Chris directive). LOW is the losing book
+    # (5/20: LOW -$24.23 vs HIGH +$40.29) — shrink exposure to a token size
+    # while the nn LOW projector keeps misfiring. The push worker passes a
+    # smaller LOW min-buy (PUSH_MIN_BUY_USD_LOW) into pure_nn_decide so the
+    # integer-contract math doesn't collapse the way $5/$5 did on 2026-05-17
+    # (min_buy == series_cap => no integer qty fits => all LOW buys skip).
+    "max_bet_low_series_usd": 1.0,
     # Legacy single-cap field — kept for any reader unaware of side-specific
     # caps. Set to the higher of the two so generic checks don't false-positive.
     "max_bet_usd": 30.0,
@@ -527,6 +539,24 @@ PUSH_MIN_EDGE_PP: int = 12
 # obs_trend_30m; mu still projects upward = systematic over-projection.
 # Set to None or 0.0 to disable.
 PUSH_MIN_H_TO_PEAK_HIGH: float = 0.5
+
+# In-bracket tail-bet gate (Gate 2). When the nn mu sits INSIDE the YES window
+# [floor-0.5, cap+0.5) but the bot picks the smaller-mass (tail) side
+# (p_chosen < 0.5), it is betting against its own central estimate for a thin
+# edge -- a structure with no winning weather regime. Raise the edge floor to
+# this value for those trades only. Backtest: 5/19+5/20 settled pure-nn pool,
+# 4 blocks, 4 losers, 0 winners killed, +$13.87 net. Mechanism-clean. Sibling
+# Gate 1 (boundary-gap) was PARKED -- it killed real winners (DAL/SFO/DEN).
+# Set to 0 to disable (reverts to PUSH_MIN_EDGE_PP for these trades).
+PUSH_TAIL_BET_MIN_EDGE_PP: int = 25
+
+# LOW-series per-bet min-buy floor for the push sizer. 2026-05-21: when LOW was
+# cut to a $1 cap (max_bet_low_series_usd), the default $1 min-buy equals the
+# cap and the integer-contract math collapses (no qty satisfies both cost >= $1
+# floor AND cost <= $1 cap except exact-divisor prices), which would silently
+# skip nearly all LOW buys. This lower floor lets LOW place genuine ~$0.40-$1.00
+# bets. HIGH keeps the standard $1 min-buy (its $15 cap never binds on min-buy).
+PUSH_MIN_BUY_USD_LOW: float = 0.40
 
 # Entry-price guardrails (cents). Skip if the ask we'd pay is outside [floor, ceil].
 # Floor protects against long-shot bets; ceiling protects against settled markets.

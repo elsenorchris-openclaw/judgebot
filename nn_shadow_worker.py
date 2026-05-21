@@ -407,8 +407,60 @@ def _try_auto_execute(cand, packet: dict, decision: dict,
     edge_val = decision.get("edge")
     if edge_val is None:
         return False, "no_edge"
-    if (edge_val * 100.0) < min_edge_pp:
-        return False, f"edge_below_floor {edge_val*100:.1f}pp < {min_edge_pp}pp"
+    edge_pp = edge_val * 100.0
+    # (2t) In-bracket tail-bet gate. When mu sits INSIDE the YES window but the
+    # bot picks the smaller-mass (tail) side, the bet is "I think it lands in
+    # the bracket, but I'll bet it doesn't" -- a wager against our own central
+    # estimate that depends entirely on sigma being calibrated in the tails
+    # (the most fragile assumption). Demand a larger edge before firing.
+    # 2026-05-20: 5/19+5/20 settled pool, 4 blocks, 4 losers, 0 winners,
+    # +$13.87 net. Mechanism-clean: betting against your own mean for a thin
+    # edge has no winning regime. Boundary-gap sibling (Gate 1) PARKED -- it
+    # killed real winners. Set PUSH_TAIL_BET_MIN_EDGE_PP=0 to disable.
+    tail_min_edge_pp = int(getattr(_cfg, "PUSH_TAIL_BET_MIN_EDGE_PP", 25))
+    effective_min_edge_pp = min_edge_pp
+    tail_reason = None
+    if tail_min_edge_pp > 0:
+        _mu = packet.get("mu_chosen")
+        _fl = packet.get("floor")
+        _cp = packet.get("cap")
+        # YES window [ylo, yhi) per bracket shape, mirroring
+        # nn_shadow_strategy._yes_window: B = [floor-0.5, cap+0.5);
+        # T-warm (floor only) = [floor+0.5, +inf); T-cold (cap only) =
+        # (-inf, cap-0.5). 2026-05-20: extended from B-only to T after
+        # HOU T84 BUY_NO (mu=83.0 favored the YES tail-cold region, bot bet
+        # the NO tail, p_chosen=0.41) slipped past the B-only gate and lost
+        # -$5.16.
+        _ylo = _yhi = None
+        try:
+            if _fl is not None and _cp is not None:
+                _ylo, _yhi = float(_fl) - 0.5, float(_cp) + 0.5
+            elif _fl is not None:
+                _ylo, _yhi = float(_fl) + 0.5, float("inf")
+            elif _cp is not None:
+                _ylo, _yhi = float("-inf"), float(_cp) - 0.5
+        except (TypeError, ValueError):
+            _ylo = _yhi = None
+        if _mu is not None and _ylo is not None:
+            try:
+                _muf = float(_mu)
+                _mu_in_yes = (_ylo <= _muf < _yhi)
+            except (TypeError, ValueError):
+                _mu_in_yes = False
+            if _mu_in_yes:
+                _p_yes = decision.get("p_yes")
+                if _p_yes is not None:
+                    try:
+                        _pf = float(_p_yes)
+                        _p_chosen = _pf if direction == "BUY_YES" else (1.0 - _pf)
+                        if _p_chosen < 0.5:
+                            effective_min_edge_pp = max(min_edge_pp, tail_min_edge_pp)
+                            tail_reason = f"tail_bet mu_in_YES p_chosen={_p_chosen:.2f}"
+                    except (TypeError, ValueError):
+                        pass
+    if edge_pp < effective_min_edge_pp:
+        detail = f" ({tail_reason})" if tail_reason else ""
+        return False, f"edge_below_floor {edge_pp:.1f}pp < {effective_min_edge_pp}pp{detail}"
     toggle_attr = f"AUTO_EXECUTE_BUY_{short_dir}_PUSH"
     if not getattr(_cfg, toggle_attr, False):
         return False, f"{toggle_attr}=False"
@@ -861,14 +913,27 @@ def _evaluate_ticker(ticker: str, trigger: str) -> None:
         pkt["mu_chosen"] = nn_res["mu"]
         pkt["sigma_chosen"] = nn_res["sigma"]
 
-        # Existing-position headroom: skip if we already hold the cap on this ticker
-        ticker_remaining = 5.0
+        # Per-series bet cap — single source of truth is the GUARDRAILS dict
+        # (guardrails.check_buy enforces the same numbers downstream; sizing
+        # here must match or guardrails would REJECT an over-cap bet outright).
+        # 2026-05-20: HIGH raised to $15 (max_bet_high_series_usd).
+        # 2026-05-21: LOW cut to $1 (max_bet_low_series_usd) — losing book.
+        _gr = getattr(_cfg, "GUARDRAILS", {}) or {}
+        _is_high_sizing = (cand.series_prefix == "KXHIGH")
+        _series_cap_usd = float(_gr.get("max_bet_high_series_usd", 5.0)) if _is_high_sizing \
+            else float(_gr.get("max_bet_low_series_usd", 5.0))
+        # Min-buy floor: LOW uses a smaller floor so a $1 cap doesn't collapse
+        # the integer-contract math (min_buy == cap => nothing fits). HIGH keeps
+        # the standard $1 floor (its $15 cap never binds on min-buy anyway).
+        _min_buy_usd = float(getattr(_cfg, "PUSH_MIN_BUY_USD_LOW", 0.40)) if not _is_high_sizing \
+            else float(_gr.get("min_buy_usd", 1.0))
+        ticker_remaining = _series_cap_usd
         if _rt is not None:
             try:
                 pos = _rt.positions.get(ticker) if hasattr(_rt, "positions") else None
                 if pos:
                     existing_cost = float(pos.get("cost", 0))
-                    ticker_remaining = max(0.0, 5.0 - existing_cost)
+                    ticker_remaining = max(0.0, _series_cap_usd - existing_cost)
             except Exception:
                 pass
 
@@ -879,6 +944,9 @@ def _evaluate_ticker(ticker: str, trigger: str) -> None:
         # the in-function ceiling without changing pure_nn_decide.
         decision = nn_shadow_strategy.pure_nn_decide(
             pkt, ticker_remaining_usd=ticker_remaining, edge_max=1.0,
+            min_buy_usd=_min_buy_usd,
+            series_cap_high_usd=float(_gr.get("max_bet_high_series_usd", 5.0)),
+            series_cap_low_usd=float(_gr.get("max_bet_low_series_usd", 5.0)),
         )
 
         if decision["decision"] in ("BUY_YES", "BUY_NO"):
