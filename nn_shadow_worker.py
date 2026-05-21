@@ -276,6 +276,41 @@ def _ensure_peak_tables_loaded() -> None:
             log.exception("failed to load pace_curves: %s", e)
 
 
+# =============================================================================
+# Peak-data alerting (2026-05-21): NO SILENT FAILURES on peak data. Two kinds:
+#   (a) missing_peak  -- _lookup_peak_hour returned None (no peak in fractional
+#       OR pace_curves) -> the cell is NOT traded. Loud Discord alert so the
+#       skip is never silent.
+#   (b) frac_fallback -- the precise fractional peak is missing for this
+#       (station, side, MM-DD); we are silently substituting the coarser
+#       pace_curves integer hour. Currently fires only for KDCA in February
+#       (sparse heating_traces history); zero in-season impact today, but
+#       surfaced so any future in-season fractional gap is never silent.
+# Dedup per (kind, station, series, climate_day): each cell is evaluated
+# thousands of times/day, so we alert ONCE. Alerts are rare (true data gaps),
+# so the dedup set stays small.
+# =============================================================================
+_peak_alert_seen: set = set()
+
+
+def _alert_peak_issue(kind: str, station: str, series: str,
+                      climate_day: str, detail: str) -> None:
+    key = (kind, station, series, climate_day)
+    if key in _peak_alert_seen:
+        return
+    _peak_alert_seen.add(key)
+    _bump(f"peak_alert_{kind}")
+    log.error("peak-data alert [%s] %s/%s %s: %s",
+              kind, station, series, climate_day, detail)
+    try:
+        import paper_judge_bot as _pjb
+        _pjb.discord_send(
+            f"\u26d4 PEAK DATA [{kind}] {station}/{series} {climate_day}: {detail}"
+        )
+    except Exception:
+        log.exception("discord_send failed for peak-data alert [%s]", kind)
+
+
 def _lookup_peak_hour(station: str, series: str, climate_day: str) -> Optional[float]:
     """Return empirical peak/min hour LST for (station, series, climate-day).
 
@@ -297,9 +332,11 @@ def _lookup_peak_hour(station: str, series: str, climate_day: str) -> Optional[f
         return None
 
     # Try fractional first when flag is on
+    frac_enabled = False
     try:
         import config as _cfg
         if getattr(_cfg, "USE_FRACTIONAL_PEAK_FOR_WINDOW", False):
+            frac_enabled = True
             frac_table = (_peak_table_frac_cache if series == "HIGH"
                           else _min_table_frac_cache)
             frac_row = frac_table.get(station) or {}
@@ -309,10 +346,19 @@ def _lookup_peak_hour(station: str, series: str, climate_day: str) -> Optional[f
     except Exception:
         pass
 
-    # Fallback to int (legacy)
+    # Fallback to int (legacy). (b) When fractional was ENABLED but missed this
+    # (station, side, MM-DD), we are silently substituting the coarser int hour
+    # -- alert so the degradation is never silent. (If int is also None, both
+    # sources missed -> caller's (a) missing_peak alert fires; skip (b) here.)
     table = _peak_table_cache if series == "HIGH" else _min_table_cache
     row = table.get(station) or {}
-    return row.get(month)
+    int_val = row.get(month)
+    if frac_enabled and int_val is not None:
+        _alert_peak_issue(
+            "frac_fallback", station, series, climate_day,
+            f"fractional peak missing for {md_key}; using coarse pace_curves int={int_val}",
+        )
+    return int_val
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -550,6 +596,12 @@ def _in_decision_window(station: str, series: str, local_hour: float,
         return False, "no_local_hour"
     peak = _lookup_peak_hour(station, series, climate_day)
     if peak is None:
+        # (a) NO peak in fractional OR pace_curves -> not trading this cell.
+        # Loud alert so a true missing-peak is never a silent skip.
+        _alert_peak_issue(
+            "missing_peak", station, series, climate_day,
+            "no peak in fractional OR pace_curves tables; NOT trading this cell",
+        )
         return False, f"no_peak_for_{station}_{series}_{climate_day}"
 
     before: Optional[float] = None
