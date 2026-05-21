@@ -528,8 +528,14 @@ PUSH_PEAK_FRACTIONAL_PATH: str = "/home/ubuntu/data/peak_fractional_5yr_10day.js
 # WORSE due to skewed errors, so the override file ships MEDIAN). Cell MAE
 # predicts holdout accuracy (corr 0.62, monotonic tiers) → scale bet down where
 # the matcher is less reliable (only ever reduces size = risk-reducing).
-USE_PUSH_BIAS_CORRECTION: bool = True   # subtract cell median-bias from μ (HIGH only)
-USE_PUSH_MAE_SIZING: bool = True        # scale bet by MAE-confidence tier
+USE_PUSH_BIAS_CORRECTION: bool = False  # REVERTED 2026-05-21: even the MEDIAN
+    # bias would have flipped 2 MSP winners→losses on 5/20 (Kalshi-settled
+    # 16-6 → 14-8) — MSP's −0.8 bias over-corrected on a cold day, pushing μ
+    # across the bracket boundary. Marginal +2.1% avg HIGH MAE not worth the
+    # boundary-flip risk. Bias still LOGGED (push_override.bias) for analysis,
+    # just not applied to μ. Flip True to re-enable.
+USE_PUSH_MAE_SIZING: bool = True        # KEPT — validated (corr 0.62); only
+    # scales bet size, never flips a bet (no boundary risk).
 # (mae_lo, mae_hi, size_multiplier). mae=None → 0.5 (unknown/fallback).
 PUSH_MAE_CONF_TIERS: list = [
     (0.0, 1.0, 1.0),     # <=1F MAE: full size (settles ~1.3F)

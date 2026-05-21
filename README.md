@@ -6,6 +6,14 @@ worst-case blast radius is bounded by code, not by prompt quality.
 
 ## Push override: HIGH median-bias + MAE confidence-sizing — 2026-05-21
 
+> **UPDATE 2026-05-21 (later): bias REVERTED, MAE sizing KEPT.** A Kalshi-settled
+> replay of 5/20's HIGH book (16-6) showed the median-bias would have flipped 2
+> Minneapolis winners→losses (→14-8), all from MSP's −0.8 bias over-correcting on
+> a cold day across the bracket boundary, with zero losses avoided. Marginal
+> +2.1% avg MAE not worth the boundary-flip risk → `USE_PUSH_BIAS_CORRECTION=False`.
+> `USE_PUSH_MAE_SIZING=True` stays (only scales size, never flips a bet). Bias is
+> still logged (`push_override.bias`) for analysis, just not applied.
+
 Out-of-sample validation (train 2000-23 → holdout 2024-25, 79,248 decisions)
 turned the dormant `bias`/`mae` override fields into two live levers in
 `nn_shadow_worker._evaluate_ticker`:

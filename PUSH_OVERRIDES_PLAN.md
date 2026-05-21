@@ -17,7 +17,7 @@ local copies are stale (CLAUDE.md RULE #0.7).
 | `push_window_overrides.py` — 480/480 windows + bias + mae | ✅ SHIPPED `cc11a38` + `6aa2f51` |
 | Windows live in bot | ✅ (`_in_decision_window` reads `ov[0]/ov[1]`) |
 | Out-of-sample validation of bias + MAE | ✅ done 2026-05-21 (see §4a) |
-| **MEDIAN-bias applied to μ — HIGH only** | ✅ SHIPPED `USE_PUSH_BIAS_CORRECTION` |
+| ~~MEDIAN-bias applied to μ~~ | ⛔ REVERTED 2026-05-21 — flipped 2 MSP winners→losses on 5/20 (Kalshi-settled 16-6→14-8). `USE_PUSH_BIAS_CORRECTION=False`; bias still logged, not applied. |
 | **MAE-based confidence sizing** | ✅ SHIPPED `USE_PUSH_MAE_SIZING` |
 | MEAN-bias application | ⛔ REJECTED (−8.6% holdout — never ship) |
 | **22 conditional regime entries used** | ❌ Phase 3 (needs runtime bucketing) |
