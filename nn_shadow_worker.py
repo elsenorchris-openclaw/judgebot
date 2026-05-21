@@ -688,10 +688,31 @@ def _in_decision_window(station: str, series: str, local_hour: float,
         return False, f"no_window_defined:{station}/{series}/m{month}"
 
     before, after = float(win[0]), float(win[1])
+    # 2026-05-21: early-side trim for HIGH accurate-but-wide cells. The window
+    # table is built on MAE (mu accuracy), but accuracy != PnL: in the ~40 HIGH
+    # cells that are accurate (mae < MAE_MAX) yet open >1h before peak, the
+    # early offsets are where the matcher hadn't seen enough of the day's curve
+    # to call the bracket. Validated on 2024-2025 holdout (n=12,548): at offset
+    # < -1.25 the matcher lands in the WRONG ~1F bracket 60% of the time and
+    # misses by >=2F (Miami-scale) 32% of the time, vs 46%/16% in the [-1.0,0]
+    # keep zone; 38 of 40 cells worse early. Live PnL (5/19-21, n=52) agreed.
+    # So cap how early these cells open WITHOUT touching their `after` edge or
+    # peak time (per-station shape preserved). Inaccurate wide cells (high mae)
+    # are intentionally LEFT ALONE -- MAE-sizing already shrinks those bets and
+    # narrowing an unpredictable cell adds nothing. mae is win[3] (4-tuple).
+    _trim_dbg = ""
+    if (series == "HIGH"
+            and getattr(_cfg, "PUSH_EARLY_TRIM_HIGH_ENABLED", True)
+            and len(win) >= 4 and win[3] is not None):
+        _cap = float(getattr(_cfg, "PUSH_EARLY_TRIM_BEFORE_CAP", 1.0))
+        _mae_max = float(getattr(_cfg, "PUSH_EARLY_TRIM_MAE_MAX", 1.6))
+        if float(win[3]) < _mae_max and before > _cap:
+            _trim_dbg = f" early_trim:before {before}->{_cap}(mae={win[3]})"
+            before = _cap
     lo = peak - before
     hi = peak + after
     ok = (lo <= local_hour <= hi)
-    return ok, f"peak={peak} window=[{lo:.1f},{hi:.1f}] cur={local_hour:.2f} src=window_table"
+    return ok, f"peak={peak} window=[{lo:.1f},{hi:.1f}] cur={local_hour:.2f} src=window_table{_trim_dbg}"
 
 
 # ─────────────────────────────────────────────────────────────────────────────

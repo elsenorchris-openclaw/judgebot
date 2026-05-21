@@ -515,6 +515,21 @@ USE_PUSH_WINDOW_OVERRIDES: bool = True
 USE_FRACTIONAL_PEAK_FOR_WINDOW: bool = True
 PUSH_PEAK_FRACTIONAL_PATH: str = "/home/ubuntu/data/peak_fractional_5yr_10day.json"
 
+# 2026-05-21: early-side trim for HIGH "accurate-but-wide" window cells. The
+# window table is built on MAE (mu accuracy), but accuracy != PnL. ~40 HIGH
+# cells are accurate (mae < MAE_MAX) yet open >1h before peak; at those early
+# offsets the matcher hasn't seen enough of the day's curve to call the ~1-2F
+# bracket. Validated 2024-2025 holdout (n=12,548): offset < -1.25 lands in the
+# WRONG bracket 60% of the time and misses by >=2F (Miami-scale) 32% of the
+# time, vs 46%/16% in the [-1.0,0] keep zone; 38 of 40 cells worse early. Live
+# PnL (5/19-21, n=52) agreed: trimming to offset>=-1.0 lifted HIGH +$18.58 ->
+# +$65.51. So cap how EARLY these cells open, leaving `after`, peak time, the
+# wide-but-INACCURATE cells (MAE-sizing already shrinks those), and all LOW
+# windows untouched. Applied in _in_decision_window. Set ENABLED=False to revert.
+PUSH_EARLY_TRIM_HIGH_ENABLED: bool = True
+PUSH_EARLY_TRIM_BEFORE_CAP: float = 1.0   # HIGH cell opens no earlier than peak-1.0h
+PUSH_EARLY_TRIM_MAE_MAX: float = 1.6      # only "accurate" cells (full-size tier); inaccurate wide cells left to MAE-sizing
+
 # 2026-05-21: per-cell MEDIAN bias correction (HIGH only) + MAE-based confidence
 # sizing. Both consume push_window_overrides 4-tuples (before, after, bias, mae)
 # and apply in nn_shadow_worker._evaluate_ticker. Out-of-sample validated
