@@ -4,6 +4,45 @@ A judgment-first Kalshi trading bot for daily weather markets. Claude is the
 entry+exit decision-maker; deterministic guardrails wrap the LLM so the
 worst-case blast radius is bounded by code, not by prompt quality.
 
+## Window table is the SOLE window source (no default fallback) — 2026-05-21 20:55 UTC
+
+`push_window_overrides.PUSH_WINDOW_OVERRIDES` is now the ONLY source of the
+push decision window. Removed the global default fallback
+(`PUSH_PEAK_HOURS_BEFORE` / `AFTER_HIGH` / `AFTER_LOW` / `AFTER`) from config.
+The "override" framing implied an optional tweak on top of a default — a
+confusing second source of truth that also let the bot silently trade cells
+where no window was ever validated.
+
+`_in_decision_window` now:
+- cell present → window `[peak-before, peak+after]`, `src=window_table`
+- cell missing → NOT traded + throttled Discord alert (`_alert_missing_window`,
+  dedup per station/series/month). No silent gaps.
+- `USE_PUSH_WINDOW_OVERRIDES=False` → clean master kill-switch (no trade, no alert)
+
+Coverage verified 480/480 (all 40 May cells present) → no current trade stops;
+this only removes the fallback-that-masks-gaps and makes any future gap loud.
+Tests updated (kill-switch + missing-cell-alert). 388 passed / 4 skipped.
+Commit f76fb1e. Backups `*.pre_window_sole_20260521`.
+
+## Peak-data alerts: no silent failures on peak lookup — 2026-05-21 20:53 UTC
+
+Two throttled Discord alerts added to `nn_shadow_worker`:
+- **(a) missing_peak** — `_lookup_peak_hour` returned None (no peak in fractional
+  OR pace_curves) → cell not traded; previously a silent skip.
+- **(b) frac_fallback** — precise fractional peak missing for (station,side,MM-DD),
+  silently substituting the coarse pace_curves int hour. Currently fires only for
+  KDCA in February (DCA Feb history is ~32% sparser than ATL, so the 5yr/10-day
+  rolling P50 has no value for 02-03..02-12 + 02-24..02-28). Zero in-season
+  impact; surfaced so any future in-season frac gap is never silent.
+
+Peak lookup is two-tier: fractional table (`peak_fractional_5yr_10day.json`,
+PRIMARY) → pace_curves int (`pace_curves_v2.json`/`_low_v2.json`, FALLBACK).
+Full-year sweep (14,600 lookups) confirmed pace_curves fallback is 480/480
+complete, so a true None never occurs today — (a) is a safety net, (b) is the
+real current silent path. Dedup per (kind,station,series,climate_day).
+Commit bb52111. Backup `nn_shadow_worker.py.pre_peak_alerts_20260521`.
+
+
 ## Global regime-MAE adjustment for sizing — 2026-05-21
 
 The conditional fields (anomaly, sigma, sky, wind) now feed sizing — as a
