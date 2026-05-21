@@ -335,6 +335,37 @@ def _alert_missing_window(station: str, series: str, month, climate_day: str,
         log.exception("discord_send failed for missing-window alert")
 
 
+_low_front_alert_seen: set = set()  # dedup low cold-front gate alerts, per (station, climate_day)
+
+
+def _alert_low_front(station: str, climate_day: str, wind_mph: float,
+                     threshold: float) -> None:
+    """Throttled Discord alert when the LOW cold-front gate (2c) blocks a push
+    BUY. Sustained wind >= PUSH_LOW_FRONT_WIND_MPH at an overnight LOW is a
+    frontal / cold-air-advection signature the nn matcher mis-handles: it
+    over-projects the daily minimum and -- unlike high-variance regimes -- its
+    sigma does not widen to flag it. Dedup per (station, climate_day): the cell
+    is evaluated thousands of times/day, so we alert ONCE per station per day."""
+    key = (station, climate_day)
+    if key in _low_front_alert_seen:
+        return
+    _low_front_alert_seen.add(key)
+    _bump("low_front_gate_fired")
+    log.warning("LOW cold-front gate fired %s %s: sustained wind %.1fmph "
+                "(>=%.0fmph) -- skipping LOW push BUYs",
+                station, climate_day, wind_mph, threshold)
+    try:
+        import paper_judge_bot as _pjb
+        _pjb.discord_send(
+            f"⛔ LOW COLD-FRONT GATE {station} {climate_day}: skipping "
+            f"LOW push BUYs — sustained wind {wind_mph:.0f}mph "
+            f"(≥{threshold:.0f}mph). Matcher over-projects the low in "
+            f"frontal regimes."
+        )
+    except Exception:
+        log.exception("discord_send failed for low cold-front gate alert")
+
+
 def _lookup_peak_hour(station: str, series: str, climate_day: str) -> Optional[float]:
     """Return empirical peak/min hour LST for (station, series, climate-day).
 
@@ -798,6 +829,30 @@ def _try_auto_execute(cand, packet: dict, decision: dict,
                     return False, f"tier1_wind {fld}={float(v):.1f}mph > {max_wind}mph"
             except (TypeError, ValueError):
                 pass
+    # (2c) LOW cold-front gate. Sustained wind >= ~15kt at an overnight LOW is
+    # a frontal / cold-air-advection signature. The nn matcher (trained on calm
+    # nights) over-projects the daily minimum by +1.5..+3°F -- and unlike
+    # high-variance regimes its sigma does NOT widen to flag it (68% of these
+    # rows backtest as sigma low/mid), so the bot trades a confident but wrong
+    # estimate. 25-yr backtest (3.17M evals): LOW wind>15kt MAE 3.1-4.3 / bias
+    # +1.6..+3.1 in cold season, cross-year validated 18/20 stations. HIGH is
+    # storm-robust -> LOW-only. Sustained wind only (a gust without sustained
+    # wind is convective, not frontal). KLAX/KMIA excluded -- marine climate,
+    # strong wind there is onshore sea-breeze with no frontal bias. Fires a
+    # throttled Discord alert (_alert_low_front, deduped per station/day).
+    if series == "LOW":
+        front_wind = float(getattr(_cfg, "PUSH_LOW_FRONT_WIND_MPH", 18.0))
+        excl = getattr(_cfg, "PUSH_LOW_FRONT_EXCLUDE", ())
+        if front_wind > 0 and cand.station not in excl:
+            ws = wo.get("wind_speed_mph")
+            try:
+                ws_f = float(ws) if ws is not None else None
+            except (TypeError, ValueError):
+                ws_f = None
+            if ws_f is not None and ws_f >= front_wind:
+                _alert_low_front(cand.station, cand.climate_day, ws_f, front_wind)
+                return False, (f"low_frontal_wind {ws_f:.1f}mph >= "
+                               f"{front_wind:.0f}mph")
     # (3) Price floor/ceiling — entry must be in [min_c, max_c]
     # 2026-05-19 v3: BUY_YES gets a higher floor (cheap-YES lottery trap).
     max_c = int(getattr(_cfg, "PUSH_MAX_ENTRY_C", 90))

@@ -622,6 +622,22 @@ PUSH_MAX_ENTRY_C: int = 80
 PUSH_MIN_VSBY_MI: float = 0.5              # visibility < 0.5 mi (dense fog / heavy precip) → skip
 PUSH_MAX_WIND_MPH: float = 40.0            # sustained wind or gust > 40 mph (~35 kt) → skip
 
+# 2026-05-21: LOW cold-front gate ("Tier 1.5"). Distinct from PUSH_MAX_WIND_MPH
+# above (40 mph, both sides, catastrophic). Sustained wind ≥ ~15 kt at an
+# overnight LOW is a frontal / cold-air-advection signature: the nn matcher
+# (trained on calm nights) over-projects the daily minimum, and — unlike
+# high-variance regimes — its sigma does NOT widen to flag it, so the bot would
+# trade a confident but wrong estimate. 25-yr backtest (3.17M evals,
+# phq_offset_cond_combined): LOW sustained wind > 15 kt → MAE 3.1-4.3°F vs ~1.7
+# calm, bias +1.6..+3.1°F in cold season; cross-year validated, 18/20 stations.
+# HIGH is storm-robust (MAE flat, no systematic bias) → LOW-side only. Sustained
+# wind only — a gust without sustained wind is convective, not frontal. 18 mph
+# ≈ 15 kt. Set to 0 / -1 to disable.
+PUSH_LOW_FRONT_WIND_MPH: float = 18.0      # LOW sustained wind ≥ this (mph) → skip
+# Stations excluded from the LOW cold-front gate: marine climates where strong
+# wind is onshore sea-breeze, not a cold front (backtest bias ≈ 0 both seasons).
+PUSH_LOW_FRONT_EXCLUDE: tuple = ("KLAX", "KMIA")
+
 # 2026-05-20: F1 rm-staleness validation for push pure-nn worker.
 # Bug discovered today: nn_shadow_worker bypassed wethr_rm.validate_rm_for_climate_day,
 # leaving the push path vulnerable to using yesterday-evening rm readings as todays
