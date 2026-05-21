@@ -75,6 +75,21 @@ class TestEarlyTrim(unittest.TestCase):
         self.assertTrue(ok, dbg)  # back inside [12.5, 14.0]
         self.assertNotIn("early_trim", dbg)
 
+    def test_negative_after_does_not_collapse(self):
+        """after<0 (window closes before peak): cap must NOT collapse the
+        window to zero width. (2.0,-1.0,mae1.4) under cap=1.0 would give
+        [peak-1,peak-1]; min-width preservation caps before->1.5 instead,
+        leaving [peak-1.5,peak-1.0] (0.5h)."""
+        ov = {("KLAX", "HIGH", 5): (2.0, -1.0, 0.1, 1.4)}
+        # peak=14.0 -> trimmed window [12.5, 13.0]; 12.7 is inside
+        ok, dbg = self._win(ov, "KLAX", "HIGH", 12.7)
+        self.assertTrue(ok, dbg)
+        self.assertIn("early_trim", dbg)
+        self.assertIn("2.0->1.5", dbg)
+        # 13.5 is past the (negative-after) close -> out
+        ok2, _ = self._win(ov, "KLAX", "HIGH", 13.5)
+        self.assertFalse(ok2)
+
 
 if __name__ == "__main__":
     unittest.main()

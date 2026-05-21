@@ -706,9 +706,15 @@ def _in_decision_window(station: str, series: str, local_hour: float,
             and len(win) >= 4 and win[3] is not None):
         _cap = float(getattr(_cfg, "PUSH_EARLY_TRIM_BEFORE_CAP", 1.0))
         _mae_max = float(getattr(_cfg, "PUSH_EARLY_TRIM_MAE_MAX", 1.6))
-        if float(win[3]) < _mae_max and before > _cap:
-            _trim_dbg = f" early_trim:before {before}->{_cap}(mae={win[3]})"
-            before = _cap
+        # Preserve a minimum 0.5h window (mirrors the generator's MIN_WIN_WIDTH_H):
+        # when `after` < 0 the window closes before peak, so a flat cap to 1.0 can
+        # collapse it to zero width and SILENTLY disable the cell -- e.g. KLAX/KATL
+        # HIGH (2.0,-1.0) -> [peak-1.0, peak-1.0]. Cap to max(1.0, 0.5 - after) so
+        # the post-trim width stays >= 0.5h.
+        _eff_cap = max(_cap, 0.5 - after)
+        if float(win[3]) < _mae_max and before > _eff_cap:
+            _trim_dbg = f" early_trim:before {before}->{_eff_cap}(mae={win[3]})"
+            before = _eff_cap
     lo = peak - before
     hi = peak + after
     ok = (lo <= local_hour <= hi)
