@@ -19,7 +19,7 @@ local copies are stale (CLAUDE.md RULE #0.7).
 | Out-of-sample validation of bias + MAE | ✅ done 2026-05-21 (see §4a) |
 | ~~MEDIAN-bias applied to μ~~ | ⛔ REVERTED 2026-05-21 — flipped 2 MSP winners→losses on 5/20 (Kalshi-settled 16-6→14-8). `USE_PUSH_BIAS_CORRECTION=False`; bias still logged, not applied. |
 | **MAE-based confidence sizing (cell-level)** | ✅ SHIPPED `USE_PUSH_MAE_SIZING` |
-| **GLOBAL regime-MAE adjustment (anomaly/sigma/sky/wind)** | ✅ SHIPPED 2026-05-21 `USE_PUSH_REGIME_MAE_ADJ` (corr 0.167→0.229; sizing-only) |
+| **GLOBAL regime-MAE adjustment (anomaly/sigma/sky/wind/tspeak)** | ✅ SHIPPED 2026-05-21 `USE_PUSH_REGIME_MAE_ADJ` — sizing-only. **Per-side (HIGH/LOW) deltas @ `PUSH_REGIME_MAE_DAMP=1.0`** (HIGH/LOW respond oppositely; hot-anomaly HIGH −0.25 / LOW +1.46). corr 0.167→0.229(pooled)→0.250(per-side). Deltas in `data/regime_mae_deltas.json` (gitignored, per-side `{high|low:{dim:{bucket}}}`). |
 | MEAN-bias application | ⛔ REJECTED (−8.6% holdout — never ship) |
 | Per-cell regime slicing (MAE) | ⛔ REJECTED — no better than cell-level (noise) |
 | Low-confidence (37-cell) gating | ⛔ REJECTED — flag is noise (clean fwd test: flagged did BETTER) |
