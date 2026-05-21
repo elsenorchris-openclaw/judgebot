@@ -4,6 +4,58 @@ A judgment-first Kalshi trading bot for daily weather markets. Claude is the
 entry+exit decision-maker; deterministic guardrails wrap the LLM so the
 worst-case blast radius is bounded by code, not by prompt quality.
 
+## Push window overrides — full 480/480 coverage + per-cell bias — 2026-05-21 13:50 UTC
+
+Regenerated `push_window_overrides.py` from the corrected 18-dimension
+conditional-MAE backtest (`per_hour_quality_v3.py`, 2000-2025, 3.17M rows,
+alti-based pressure + graceful per-dim degradation). The new file ships a
+`(before, after, bias)` 3-tuple for **every** (station, side, month) cell —
+480/480 coverage, up from 424 (and only 329 after the old MAE gate). Replaces
+the prior `build_overrides_accuracy.py` output.
+
+**Generator changes (`build_overrides_hierarchical.py`):**
+- **Every cell ships its own window + bias.** Removed the old `MAE ≥ 0.7°F →
+  delete` gate on the unconditional window — a cell's own data-driven window
+  always beats the hand-picked global default (2.5h/1.5h). The 0.7°F gate now
+  only governs *conditional* regime entries (the 22 ultra-precise refinements).
+- **Bounds relaxed to physical sanity** (full offset span [-4,+1]); the old
+  arbitrary [0,4.5]/[-2.5,1.5] fences had rejected 56 cells whose own window
+  was simply early or narrow.
+- **Width-collapsed cells widened around their OWN best offset** to the minimum
+  tradeable width (0.5h) — never borrow from neighbors when the cell has its own
+  timing. Where the widened window lands post-peak, the bot's h2pk gate
+  correctly declines (the cell isn't predictable pre-peak — don't force a bet).
+- **Holdout demoted from veto to confidence flag.** A window whose 2024-25 MAE
+  degraded >1.5× vs train is no longer dropped — it's still the cell's best
+  *timing* estimate (the test only says accuracy is less stable out-of-sample,
+  itself noisy on ~55 holdout days). These 37 cells are emitted as
+  `PUSH_WINDOW_LOW_CONFIDENCE` for later conservative handling.
+- Neighbor→season→cross-station→default fallback exists for cells with *no*
+  usable own window — fires for **0 cells** today (future insurance).
+
+**The bias is the prize.** Each tuple's 3rd element is the pooled pre-peak
+`mean(mu_proj − actual_extreme)` over the window — the matcher's *residual*
+systematic error after its own internal per-side correction. Range −1.69 to
++3.04°F (LOW winter months carry large positive bias = matcher over-projects
+cold-night lows). For ~2°F brackets this can flip which bracket μ lands in.
+
+**Deployment status (IMPORTANT):** the **windows are live now** —
+`_in_decision_window` reads `ov[0]/ov[1]`. The **bias (`ov[2]`) is dormant** —
+applying it needs a code change in `nn_shadow_worker._evaluate_ticker`
+(`pkt["mu_chosen"] -= bias` after the matcher sets μ, before `pure_nn_decide`),
+gated behind a new `USE_PUSH_BIAS_CORRECTION` flag. That, the 22 conditional
+entries, and low-confidence handling are the deferred Phase 2.
+
+**Validation:** 480/480 coverage, 0 pathological windows, sane bias distribution,
+per-station streaming generator (no OOM). Backup
+`push_window_overrides.py.pre_fullcoverage_20260521`. PID 831618 single+current,
+clean startup.
+
+**Maintenance:** the per-cell bias is coupled to the matcher config at backtest
+time. If `NN_BIAS_CORR_*` or sigma factors change, regenerate via
+`python3 tools/per_hour_quality/build_overrides_hierarchical.py >
+push_window_overrides.py`.
+
 ## In-bracket tail-bet gate (Gate 2) — 2026-05-20
 
 The pure-nn push path now raises the edge floor for a structurally-doomed
