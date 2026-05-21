@@ -39,12 +39,24 @@ systematic error after its own internal per-side correction. Range −1.69 to
 +3.04°F (LOW winter months carry large positive bias = matcher over-projects
 cold-night lows). For ~2°F brackets this can flip which bracket μ lands in.
 
+**Tuple format is now `(before, after, bias, mae)` — 2026-05-21 14:xx UTC.**
+`mae` is the cell's expected pre-peak accuracy (°F), range 0.71–4.34, p50 1.58.
+`nn_shadow_worker._lookup_push_override()` surfaces the matched entry and
+`_evaluate_ticker` stamps `pkt["push_override"] = {before, after, bias, mae, src}`,
+which is written into every `shadow_nn_strategy.jsonl` record. This is
+**observability only** — `mae`/`bias` are logged per decision (as a future
+confidence/sizing signal) but NOT yet applied to the trade. Lets us validate
+MAE-based sizing on settled trades before committing to it. Conditional entries
+carry their regime's (lower) MAE; the *regime-conditional* MAE at runtime needs
+the Phase-2 bucketing. The lookup handles legacy 2-/3-tuples (bias/mae → None).
+
 **Deployment status (IMPORTANT):** the **windows are live now** —
-`_in_decision_window` reads `ov[0]/ov[1]`. The **bias (`ov[2]`) is dormant** —
-applying it needs a code change in `nn_shadow_worker._evaluate_ticker`
-(`pkt["mu_chosen"] -= bias` after the matcher sets μ, before `pure_nn_decide`),
-gated behind a new `USE_PUSH_BIAS_CORRECTION` flag. That, the 22 conditional
-entries, and low-confidence handling are the deferred Phase 2.
+`_in_decision_window` reads `ov[0]/ov[1]`. The **bias (`ov[2]`) and mae (`ov[3]`)
+are logged but NOT applied** — applying bias needs a code change in
+`nn_shadow_worker._evaluate_ticker` (`pkt["mu_chosen"] -= bias` after the matcher
+sets μ, before `pure_nn_decide`), gated behind a new `USE_PUSH_BIAS_CORRECTION`
+flag. That, MAE-based sizing, the 22 conditional entries, and low-confidence
+handling are the deferred Phase 2.
 
 **Validation:** 480/480 coverage, 0 pathological windows, sane bias distribution,
 per-station streaming generator (no OOM). Backup

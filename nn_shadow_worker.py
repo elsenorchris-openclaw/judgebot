@@ -316,6 +316,40 @@ def _lookup_peak_hour(station: str, series: str, climate_day: str) -> Optional[f
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Push override lookup (read-only, for per-decision logging + future sizing)
+# ─────────────────────────────────────────────────────────────────────────────
+def _lookup_push_override(station: str, series: str,
+                          climate_day: str) -> Optional[dict]:
+    """Return the matched unconditional push override as a dict for logging:
+    {before, after, bias, mae, src}, or None when overrides are disabled or no
+    entry exists. READ-ONLY — does not affect the decision window itself
+    (that stays in _in_decision_window). `mae` is the cell's expected pre-peak
+    accuracy (°F); `bias` is the residual μ correction. Both are logged per
+    decision so we can later validate MAE-based sizing / bias application.
+    Handles legacy 2-/3-tuples gracefully (bias/mae → None)."""
+    try:
+        import config as _cfg
+        if not getattr(_cfg, "USE_PUSH_WINDOW_OVERRIDES", False):
+            return None
+        try:
+            from push_window_overrides import PUSH_WINDOW_OVERRIDES
+        except ImportError:
+            return None
+        month = int(climate_day.split("-")[1])
+        ov = PUSH_WINDOW_OVERRIDES.get((station, series, month))
+        if ov is None:
+            return None
+        before = float(ov[0])
+        after = float(ov[1])
+        bias = float(ov[2]) if len(ov) > 2 and ov[2] is not None else None
+        mae = float(ov[3]) if len(ov) > 3 and ov[3] is not None else None
+        return {"before": before, "after": after, "bias": bias,
+                "mae": mae, "src": "unconditional"}
+    except Exception:
+        return None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Per-station decision-window check (auto-execute gate)
 # ─────────────────────────────────────────────────────────────────────────────
 def _in_decision_window(station: str, series: str, local_hour: float,
@@ -885,6 +919,13 @@ def _evaluate_ticker(ticker: str, trigger: str) -> None:
         if pkt is None:
             return
 
+        # Tag the packet with its matched push override (window + bias + mae).
+        # Read-only — logged per decision for analysis; bias/mae not yet applied
+        # to the decision (Phase 2). mae = cell's expected pre-peak accuracy (°F).
+        _ov_series = "HIGH" if cand.series_prefix == "KXHIGH" else "LOW"
+        pkt["push_override"] = _lookup_push_override(
+            cand.station, _ov_series, cand.climate_day)
+
         # Run nn_match via the shadow adapter (handles trajectory build,
         # rm-anchor data, side gating, etc).
         nn_res = nn_shadow.shadow_nn_proj(pkt)
@@ -902,6 +943,7 @@ def _evaluate_ticker(ticker: str, trigger: str) -> None:
                 "nn_fired": False,
                 "rm": pkt.get("running_min_or_max"),
                 "signals": _signals_block(pkt),
+                "push_override": pkt.get("push_override"),
                 "decision": "SKIP",
                 "reason": "nn_match did not fire (no projection)",
             })
@@ -1000,6 +1042,11 @@ def _evaluate_ticker(ticker: str, trigger: str) -> None:
             # 2026-05-19: obs/wethr signals for post-hoc BUY_YES filter discovery.
             # Pure additive — pure_nn_decide does NOT use these yet.
             "signals": _signals_block(pkt),
+            # 2026-05-21: matched push override {before,after,bias,mae,src}.
+            # mae = cell's expected pre-peak accuracy (°F) — logged as a
+            # confidence/sizing signal for later analysis (bias/mae not yet
+            # applied to the decision; that's Phase 2).
+            "push_override": pkt.get("push_override"),
             "decision": decision["decision"],
             "side": decision["side"],
             "edge_pp": round(decision["edge"] * 100, 2) if decision.get("edge") is not None else None,

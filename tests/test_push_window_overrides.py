@@ -105,15 +105,27 @@ class TestPushWindowOverrides(unittest.TestCase):
         self.assertTrue(lo <= 14.0 <= hi, dbg)
 
     def test_dict_loads_and_has_expected_size(self):
-        """PUSH_WINDOW_OVERRIDES has ~460 cells (frac-aligned) and ATL HIGH 5
-        is well-formed with peak-relative offsets."""
+        """PUSH_WINDOW_OVERRIDES has full 480/480 coverage and ATL HIGH 5 is a
+        well-formed (before, after, bias, mae) 4-tuple.
+
+        2026-05-21: format is now (before, after, bias, mae) — bias is the μ
+        correction, mae the cell's expected pre-peak accuracy (°F). Bounds are
+        physical-sanity only (before ∈ [-1, 4], after ∈ [-4, 1])."""
         from push_window_overrides import PUSH_WINDOW_OVERRIDES
-        self.assertGreaterEqual(len(PUSH_WINDOW_OVERRIDES), 400)
+        uncond = [k for k in PUSH_WINDOW_OVERRIDES if len(k) == 3]
+        self.assertGreaterEqual(len(uncond), 480)
         self.assertIn(("KATL", "HIGH", 5), PUSH_WINDOW_OVERRIDES)
-        b, a = PUSH_WINDOW_OVERRIDES[("KATL", "HIGH", 5)]
-        # Sanity: before in [0, 5.5], after in [-3.0, 1.5] (HIGH bounds)
-        self.assertTrue(0.0 <= b <= 5.5, f"before {b} out of HIGH range")
-        self.assertTrue(-3.0 <= a <= 1.5, f"after {a} out of HIGH range")
+        ov = PUSH_WINDOW_OVERRIDES[("KATL", "HIGH", 5)]
+        self.assertEqual(len(ov), 4, f"expected 4-tuple, got {ov}")
+        b, a, bias, mae = ov
+        # Physical-sanity window bounds
+        self.assertTrue(-1.0 <= b <= 4.0, f"before {b} out of range")
+        self.assertTrue(-4.0 <= a <= 1.0, f"after {a} out of range")
+        self.assertGreaterEqual(b + a, 0.5, f"width {b + a} below min")
+        # bias is a float; mae is a positive float (or None for fallback cells)
+        self.assertIsInstance(bias, float)
+        if mae is not None:
+            self.assertGreater(mae, 0.0, f"mae {mae} should be positive")
 
 
 if __name__ == "__main__":
