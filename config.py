@@ -544,6 +544,17 @@ PUSH_MAE_CONF_TIERS: list = [
     (2.5, 99.0, 0.3),    # >=2.5F MAE: minimal (settles ~3F)
 ]
 
+# 2026-05-21: GLOBAL regime-MAE adjustment. Before tiering the sizing MAE, adjust
+# the cell's MAE by the day's regime via global (pooled-across-all-cells) deltas
+# for sigma/anomaly/sky/wind (data/regime_mae_deltas.json + climate_normals_
+# hourly.json). Out-of-sample validated: adding these lifts per-decision MAE-
+# prediction corr 0.167 -> 0.229; the deltas are stable train->holdout and
+# physical (high sigma/anomaly/cloud/wind = harder day). The correction is a
+# DAMPED sum (dims correlate) added on top of the per-cell baseline. Sizing-only
+# (no bet-direction flip). Flip False to revert to pure cell-MAE sizing.
+USE_PUSH_REGIME_MAE_ADJ: bool = True
+PUSH_REGIME_MAE_DAMP: float = 0.6   # damping on the summed deltas (corr-overlap)
+
 # Minimum edge_pp (percentage-points of P(direction) − market_implied) for
 # nn_shadow_strategy.pure_nn_decide to fire. Default in the function is 6pp;
 # we raise to 12pp based on 2026-05-20 backtest on n=196 trades (166 settled

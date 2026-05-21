@@ -18,10 +18,12 @@ local copies are stale (CLAUDE.md RULE #0.7).
 | Windows live in bot | ✅ (`_in_decision_window` reads `ov[0]/ov[1]`) |
 | Out-of-sample validation of bias + MAE | ✅ done 2026-05-21 (see §4a) |
 | ~~MEDIAN-bias applied to μ~~ | ⛔ REVERTED 2026-05-21 — flipped 2 MSP winners→losses on 5/20 (Kalshi-settled 16-6→14-8). `USE_PUSH_BIAS_CORRECTION=False`; bias still logged, not applied. |
-| **MAE-based confidence sizing** | ✅ SHIPPED `USE_PUSH_MAE_SIZING` |
+| **MAE-based confidence sizing (cell-level)** | ✅ SHIPPED `USE_PUSH_MAE_SIZING` |
+| **GLOBAL regime-MAE adjustment (anomaly/sigma/sky/wind)** | ✅ SHIPPED 2026-05-21 `USE_PUSH_REGIME_MAE_ADJ` (corr 0.167→0.229; sizing-only) |
 | MEAN-bias application | ⛔ REJECTED (−8.6% holdout — never ship) |
-| **22 conditional regime entries used** | ❌ Phase 3 (needs runtime bucketing) |
-| **Low-confidence (37 cells) conservative handling** | ❌ Phase 3 |
+| Per-cell regime slicing (MAE) | ⛔ REJECTED — no better than cell-level (noise) |
+| Low-confidence (37-cell) gating | ⛔ REJECTED — flag is noise (clean fwd test: flagged did BETTER) |
+| 22 conditional WINDOW entries (per-cell) | ⏸ tested: 7/7 checkable HELD but tiny footprint; superseded by the global regime adjustment |
 
 Bias field in the override file is now the **MEDIAN** residual (patched by
 `tools/per_hour_quality/patch_median_bias.py` after the generator). Current bot

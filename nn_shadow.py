@@ -339,6 +339,7 @@ def _shadow_nn_proj_inner(packet: dict) -> Optional[dict]:
         "mu": mu,
         "sigma": res.get("sigma_proj_f"),
         "sigma_raw": res.get("sigma_raw_f"),
+        "sigma_natural": res.get("sigma_natural_f"),  # raw analog-spread, for regime bucketing
         "sigma_factor": res.get("sigma_factor_applied"),
         "bias_correction": res.get("bias_correction_applied_f"),
         "fit_quality_thresh": res.get("fit_quality_thresh"),

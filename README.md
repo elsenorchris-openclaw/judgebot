@@ -4,6 +4,29 @@ A judgment-first Kalshi trading bot for daily weather markets. Claude is the
 entry+exit decision-maker; deterministic guardrails wrap the LLM so the
 worst-case blast radius is bounded by code, not by prompt quality.
 
+## Global regime-MAE adjustment for sizing — 2026-05-21
+
+The conditional fields (anomaly, sigma, sky, wind) now feed sizing — as a
+GLOBAL correction on top of the per-cell MAE, not per-cell slicing. Per-cell
+regime slicing failed (too few samples/slice → noise). The global delta —
+"across ALL cells, hot-anomaly days run +0.98°F MAE, cloudy +0.51, strong-wind
++0.75, high-sigma +0.71; cold/clear/calm/low-sigma run negative" — is learned on
+200K–1M days each, so it's precise and stable train→holdout. Adding it lifts
+per-decision MAE-prediction corr 0.167 → 0.229 (out-of-sample).
+
+`nn_shadow_worker._regime_adjusted_mae`: `adjusted_mae = cell_mae + DAMP * Σ
+delta(dim, today's bucket)` for sigma/anomaly/sky/wind, then `_mae_conf_mult`
+tiers off the adjusted MAE. A clear/calm day revises the cell MAE *down* (size
+up toward the cap); a hot+cloudy+windy day revises it *up* (size down).
+**Sizing-only — never flips a bet** (unlike the reverted bias). Flag
+`USE_PUSH_REGIME_MAE_ADJ`, damping `PUSH_REGIME_MAE_DAMP=0.6` (dims correlate).
+
+Inputs: `sigma_natural` (exposed from `shadow_nn_proj`), `wethr_obs`
+cloud_1_coverage + wind_speed_mph, anomaly = current temp − climate normal.
+Tables (gitignored, regenerate via `tools/per_hour_quality/export_regime_tables.py`):
+`data/regime_mae_deltas.json` + `data/climate_normals_hourly.json`.
+Verified live: 66/66 decisions adjusted. Backups `*.pre_regime_20260521`.
+
 ## Push override: HIGH median-bias + MAE confidence-sizing — 2026-05-21
 
 > **UPDATE 2026-05-21 (later): bias REVERTED, MAE sizing KEPT.** A Kalshi-settled

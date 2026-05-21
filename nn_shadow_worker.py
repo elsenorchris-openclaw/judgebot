@@ -375,6 +375,135 @@ def _mae_conf_mult(mae) -> float:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Global regime-MAE adjustment (2026-05-21) — adjusts the cell's expected MAE by
+# the day's regime, then sizes off the adjusted MAE. Out-of-sample validated:
+# adding global (pooled-across-all-cells) deltas for sigma/anomaly/sky/wind lifts
+# per-decision MAE-prediction corr 0.167 -> 0.229. The deltas are a CORRECTION on
+# top of the per-cell baseline ("today is hot+cloudy -> add +Δ"), robust because
+# learned on 200K-1M days each. Sizing-only (no flip risk).
+# ─────────────────────────────────────────────────────────────────────────────
+_regime_deltas = None          # {dim: {bucket: delta_F}}
+_climate_normals = None        # {"Kxxx": {"MM-DD": [24 hourly medians]}}
+_regime_tables_loaded = False
+_regime_tables_lock = threading.Lock()
+
+
+def _ensure_regime_tables() -> None:
+    global _regime_deltas, _climate_normals, _regime_tables_loaded
+    if _regime_tables_loaded:
+        return
+    with _regime_tables_lock:
+        if _regime_tables_loaded:
+            return
+        base = Path("/home/ubuntu/paper_judge_bot/data")
+        try:
+            with open(base / "regime_mae_deltas.json") as f:
+                _regime_deltas = json.load(f)
+        except Exception:
+            _regime_deltas = {}
+        try:
+            with open(base / "climate_normals_hourly.json") as f:
+                _climate_normals = json.load(f)
+        except Exception:
+            _climate_normals = {}
+        _regime_tables_loaded = True
+
+
+def _rt_sigma_bucket(sig):
+    if sig is None:
+        return None
+    if sig < 1.5:
+        return "low"
+    if sig < 2.5:
+        return "mid"
+    return "high"
+
+
+def _rt_sky_bucket(cov):
+    # wethr cloud_1_coverage string -> clear/partly/cloudy (matches skyc1 enum)
+    if not cov:
+        return None
+    c = str(cov).strip().upper()
+    if c in ("CLR", "SKC", "FEW"):
+        return "clear"
+    if c == "SCT":
+        return "partly"
+    if c in ("BKN", "OVC", "VV"):
+        return "cloudy"
+    return None
+
+
+def _rt_wind_bucket(mph):
+    # backtest bucketed knots (<5 calm, <15 moderate, else strong); convert mph
+    if mph is None:
+        return None
+    try:
+        kt = float(mph) / 1.15078
+    except (TypeError, ValueError):
+        return None
+    if kt < 5.0:
+        return "calm"
+    if kt < 15.0:
+        return "moderate"
+    return "strong"
+
+
+def _rt_anomaly_bucket(station, climate_day, local_hour, cur_tmpf):
+    if cur_tmpf is None or local_hour is None:
+        return None
+    try:
+        parts = climate_day.split("-")
+        md = "%02d-%02d" % (int(parts[1]), int(parts[2]))
+        hr = int(float(local_hour)) % 24
+    except Exception:
+        return None
+    st_norm = (_climate_normals or {}).get(station)
+    if not st_norm:
+        return None
+    arr = st_norm.get(md)
+    if not arr or hr >= len(arr) or arr[hr] is None:
+        return None
+    anom = float(cur_tmpf) - float(arr[hr])
+    if anom < -5.0:
+        return "cold"
+    if anom > 5.0:
+        return "hot"
+    return "normal"
+
+
+def _regime_adjusted_mae(cell_mae, cand, pkt, nn_res):
+    """cell_mae + damped sum of global regime deltas for today's buckets.
+    Returns (adjusted_mae, debug_dict). Falls back to cell_mae on any miss."""
+    if cell_mae is None:
+        return cell_mae, {}
+    _ensure_regime_tables()
+    if not _regime_deltas:
+        return cell_mae, {}
+    wo = pkt.get("wethr_obs") or {}
+    ctx = pkt.get("local_clock") or {}
+    bk = {
+        "sigma":   _rt_sigma_bucket(nn_res.get("sigma_natural")),
+        "anomaly": _rt_anomaly_bucket(cand.station, cand.climate_day,
+                                      ctx.get("local_hour"), wo.get("temp_f")),
+        "sky":     _rt_sky_bucket(wo.get("cloud_1_coverage")),
+        "wind":    _rt_wind_bucket(wo.get("wind_speed_mph")),
+    }
+    total = 0.0
+    applied = {}
+    for dim, b in bk.items():
+        if b is None:
+            continue
+        dlt = (_regime_deltas.get(dim) or {}).get(b)
+        if dlt is not None:
+            total += float(dlt)
+            applied[dim] = (b, dlt)
+    damp = float(getattr(_cfg, "PUSH_REGIME_MAE_DAMP", 0.6))
+    adj = max(0.1, cell_mae + damp * total)
+    return round(adj, 3), {"buckets": applied, "raw_delta": round(total, 3),
+                           "damp": damp, "cell_mae": cell_mae}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Per-station decision-window check (auto-execute gate)
 # ─────────────────────────────────────────────────────────────────────────────
 def _in_decision_window(station: str, series: str, local_hour: float,
@@ -1030,7 +1159,15 @@ def _evaluate_ticker(ticker: str, trigger: str) -> None:
         _conf_mult = 1.0
         if getattr(_cfg, "USE_PUSH_MAE_SIZING", False):
             _po = pkt.get("push_override")
-            _conf_mult = _mae_conf_mult(_po.get("mae") if _po else None)
+            _size_mae = _po.get("mae") if _po else None
+            # 2026-05-21: optionally adjust the cell MAE by the day's regime
+            # (sigma/anomaly/sky/wind global deltas) before tiering. Better
+            # per-decision accuracy estimate -> better-calibrated sizing.
+            if getattr(_cfg, "USE_PUSH_REGIME_MAE_ADJ", False) and _size_mae is not None:
+                _size_mae, _adj_dbg = _regime_adjusted_mae(_size_mae, cand, pkt, nn_res)
+                pkt["regime_mae_adj"] = _adj_dbg
+                pkt["mae_adjusted"] = _size_mae
+            _conf_mult = _mae_conf_mult(_size_mae)
             ticker_remaining *= _conf_mult
         pkt["mae_conf_mult"] = round(_conf_mult, 3)
 
@@ -1104,6 +1241,8 @@ def _evaluate_ticker(ticker: str, trigger: str) -> None:
             "mu_pre_bias": pkt.get("mu_pre_bias"),
             "bias_applied": pkt.get("bias_applied"),
             "mae_conf_mult": pkt.get("mae_conf_mult"),
+            "mae_adjusted": pkt.get("mae_adjusted"),
+            "regime_mae_adj": pkt.get("regime_mae_adj"),
             "decision": decision["decision"],
             "side": decision["side"],
             "edge_pp": round(decision["edge"] * 100, 2) if decision.get("edge") is not None else None,
