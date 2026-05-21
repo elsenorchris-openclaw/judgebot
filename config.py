@@ -560,7 +560,14 @@ PUSH_MAE_CONF_TIERS: list = [
 # DAMPED sum (dims correlate) added on top of the per-cell baseline. Sizing-only
 # (no bet-direction flip). Flip False to revert to pure cell-MAE sizing.
 USE_PUSH_REGIME_MAE_ADJ: bool = True
-PUSH_REGIME_MAE_DAMP: float = 0.6   # damping on the summed deltas (corr-overlap)
+# 2026-05-21: deltas are now PER-SIDE ({high/low:{dim:{bucket}}}) — regime
+# affects HIGH vs LOW oppositely (hot-anomaly: HIGH -0.25 / LOW +1.46), so the
+# pooled version averaged opposite effects and was wrong for both. Per-side
+# lifts holdout MAE-prediction corr 0.231 -> 0.250. Damping 0.6 -> 1.0: pooled
+# deltas needed shrinkage to offset being wrong; clean per-side ones don't.
+# Tier cutpoints unchanged (per-side@1.0 calibration <1.6->1.39, 1.6-2.4->1.81,
+# 2.4-3.2->2.32, >3.2->3.61 still matches the 1.0/0.7/0.5/0.3 multipliers).
+PUSH_REGIME_MAE_DAMP: float = 1.0
 
 # Minimum edge_pp (percentage-points of P(direction) − market_implied) for
 # nn_shadow_strategy.pure_nn_decide to fire. Default in the function is 6pp;

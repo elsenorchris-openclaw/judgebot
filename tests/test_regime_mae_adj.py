@@ -113,6 +113,28 @@ class TestRegimeAdjustedMae(unittest.TestCase):
                                           {"wethr_obs": {}, "local_clock": {}}, {})
         self.assertEqual(adj, 1.4)
 
+    def test_per_side_deltas_high_vs_low(self):
+        # per-side format: hot-anomaly is MORE accurate for HIGH (-0.25), much
+        # LESS for LOW (+1.46). HIGH and LOW must read their own side's delta.
+        config.PUSH_REGIME_MAE_DAMP = 1.0
+        nsw._regime_deltas = {
+            "high": {"anomaly": {"hot": -0.25}},
+            "low": {"anomaly": {"hot": 1.46}},
+        }
+        pkt = {"wethr_obs": {"temp_f": 92.0}, "local_clock": {"local_hour": 14},
+               "rm_age_max_sec": None, "rm_age_min_sec": None}
+        nn_res = {"sigma_natural": None}  # only anomaly contributes
+        high_cand = SimpleNamespace(station="KMIA", climate_day="2026-05-21",
+                                    series_prefix="KXHIGH")
+        low_cand = SimpleNamespace(station="KMIA", climate_day="2026-05-21",
+                                   series_prefix="KXLOW")
+        adj_hi, _ = nsw._regime_adjusted_mae(1.4, high_cand, pkt, nn_res)
+        adj_lo, _ = nsw._regime_adjusted_mae(1.4, low_cand, pkt, nn_res)
+        # damp 1.0: HIGH -> 1.4-0.25=1.15 ; LOW -> 1.4+1.46=2.86
+        self.assertAlmostEqual(adj_hi, 1.15, places=2)
+        self.assertAlmostEqual(adj_lo, 2.86, places=2)
+        self.assertLess(adj_hi, adj_lo)
+
 
 if __name__ == "__main__":
     unittest.main()

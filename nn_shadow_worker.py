@@ -512,16 +512,22 @@ def _regime_adjusted_mae(cell_mae, cand, pkt, nn_res):
         "wind":    _rt_wind_bucket(wo.get("wind_speed_mph")),
         "tspeak":  _rt_tspeak_bucket(_rm_age),
     }
+    # 2026-05-21: per-side deltas — regime affects HIGH vs LOW oppositely
+    # (e.g. hot-anomaly: HIGH more accurate −0.25, LOW much less +1.46). Deltas
+    # keyed {side:{dim:{bucket}}}. Falls back to legacy pooled {dim:{bucket}}.
+    _side = "high" if cand.series_prefix == "KXHIGH" else "low"
+    _src = (_regime_deltas.get(_side) if _side in _regime_deltas
+            else _regime_deltas) or {}
     total = 0.0
     applied = {}
     for dim, b in bk.items():
         if b is None:
             continue
-        dlt = (_regime_deltas.get(dim) or {}).get(b)
+        dlt = (_src.get(dim) or {}).get(b)
         if dlt is not None:
             total += float(dlt)
             applied[dim] = (b, dlt)
-    damp = float(getattr(_cfg, "PUSH_REGIME_MAE_DAMP", 0.6))
+    damp = float(getattr(_cfg, "PUSH_REGIME_MAE_DAMP", 1.0))
     adj = max(0.1, cell_mae + damp * total)
     return round(adj, 3), {"buckets": applied, "raw_delta": round(total, 3),
                            "damp": damp, "cell_mae": cell_mae}
