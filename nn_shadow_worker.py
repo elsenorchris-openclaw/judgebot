@@ -291,6 +291,7 @@ def _ensure_peak_tables_loaded() -> None:
 # so the dedup set stays small.
 # =============================================================================
 _peak_alert_seen: set = set()
+_window_alert_seen: set = set()  # dedup for missing-window alerts, per (station,series,month)
 
 
 def _alert_peak_issue(kind: str, station: str, series: str,
@@ -309,6 +310,29 @@ def _alert_peak_issue(kind: str, station: str, series: str,
         )
     except Exception:
         log.exception("discord_send failed for peak-data alert [%s]", kind)
+
+
+def _alert_missing_window(station: str, series: str, month, climate_day: str,
+                          detail: str) -> None:
+    """Throttled Discord alert when the window table has NO entry for a cell.
+    As of 2026-05-21 the window table (push_window_overrides.PUSH_WINDOW_OVERRIDES)
+    is the SOLE source of trading windows -- there is no default fallback -- so a
+    missing cell means the bot will NOT trade it. This makes that loud, never
+    silent. Dedup per (station, series, month)."""
+    key = (station, series, month)
+    if key in _window_alert_seen:
+        return
+    _window_alert_seen.add(key)
+    _bump("window_alert_missing")
+    log.error("missing-window alert %s/%s month=%s (%s): %s",
+              station, series, month, climate_day, detail)
+    try:
+        import paper_judge_bot as _pjb
+        _pjb.discord_send(
+            f"\u26d4 PUSH WINDOW MISSING {station}/{series} month={month}: {detail}"
+        )
+    except Exception:
+        log.exception("discord_send failed for missing-window alert")
 
 
 def _lookup_peak_hour(station: str, series: str, climate_day: str) -> Optional[float]:
@@ -584,13 +608,15 @@ def _regime_adjusted_mae(cell_mae, cand, pkt, nn_res):
 # ─────────────────────────────────────────────────────────────────────────────
 def _in_decision_window(station: str, series: str, local_hour: float,
                         climate_day: str) -> tuple[bool, str]:
-    """Return (in_window, debug_str). Window is [peak_hr − BEFORE, peak_hr + AFTER]
-    using the empirical per-(station, month) peak/min hour from pace_curves.
+    """Return (in_window, debug_str). Window is [peak − before, peak + after].
 
-    BEFORE/AFTER selection:
-      1. If config.USE_PUSH_WINDOW_OVERRIDES is True AND (station, series, month)
-         is present in push_window_overrides.PUSH_WINDOW_OVERRIDES → use that.
-      2. Otherwise fall back to global PUSH_PEAK_HOURS_BEFORE / AFTER_<HIGH|LOW>.
+    2026-05-21: (before, after) come SOLELY from the per-(station, series,
+    month) window table (push_window_overrides.PUSH_WINDOW_OVERRIDES). There is
+    NO default-window fallback. A cell missing from the table is NOT traded and
+    fires a throttled Discord alert (_alert_missing_window) -- no silent gaps.
+    USE_PUSH_WINDOW_OVERRIDES=False is a clean master kill-switch (no trades, no
+    alert). The peak hour itself comes from _lookup_peak_hour (fractional +
+    pace_curves int fallback); a missing peak fires the (a) missing_peak alert.
     """
     if local_hour is None:
         return False, "no_local_hour"
@@ -604,41 +630,37 @@ def _in_decision_window(station: str, series: str, local_hour: float,
         )
         return False, f"no_peak_for_{station}_{series}_{climate_day}"
 
-    before: Optional[float] = None
-    after: Optional[float] = None
-    src = "global"
-    try:
-        import config as _cfg
-        if getattr(_cfg, "USE_PUSH_WINDOW_OVERRIDES", False):
-            try:
-                from push_window_overrides import PUSH_WINDOW_OVERRIDES
-            except ImportError:
-                PUSH_WINDOW_OVERRIDES = {}
-            try:
-                month = int(climate_day.split("-")[1])
-            except Exception:
-                month = None
-            if month is not None:
-                ov = PUSH_WINDOW_OVERRIDES.get((station, series, month))
-                if ov is not None:
-                    before, after = float(ov[0]), float(ov[1])
-                    src = "override"
-        if before is None:
-            before = float(getattr(_cfg, "PUSH_PEAK_HOURS_BEFORE", 2.5))
-            if series == "HIGH":
-                after = float(getattr(_cfg, "PUSH_PEAK_HOURS_AFTER_HIGH",
-                                      getattr(_cfg, "PUSH_PEAK_HOURS_AFTER", 1.5)))
-            else:
-                after = float(getattr(_cfg, "PUSH_PEAK_HOURS_AFTER_LOW", 0.5))
-    except Exception:
-        before = 2.5
-        after = 1.5 if series == "HIGH" else 0.5
-        src = "fallback"
+    import config as _cfg
+    if not getattr(_cfg, "USE_PUSH_WINDOW_OVERRIDES", True):
+        # Master kill-switch: push window system disabled. Intentional (not a
+        # data gap) -> no alert, no trade.
+        return False, "push_window_system_disabled"
 
+    try:
+        month = int(climate_day.split("-")[1])
+    except Exception:
+        return False, f"bad_climate_day:{climate_day}"
+
+    try:
+        from push_window_overrides import PUSH_WINDOW_OVERRIDES
+    except ImportError:
+        _alert_missing_window(station, series, month, climate_day,
+                              "push_window_overrides module failed to import")
+        return False, "window_table_import_failed"
+
+    win = PUSH_WINDOW_OVERRIDES.get((station, series, month))
+    if win is None:
+        # Window table is the SOLE source -- no default fallback. A cell with no
+        # validated window is NOT traded, and we alert loudly (no silent gaps).
+        _alert_missing_window(station, series, month, climate_day,
+                              "cell absent from window table; NOT trading until table regenerated")
+        return False, f"no_window_defined:{station}/{series}/m{month}"
+
+    before, after = float(win[0]), float(win[1])
     lo = peak - before
     hi = peak + after
     ok = (lo <= local_hour <= hi)
-    return ok, f"peak={peak} window=[{lo:.1f},{hi:.1f}] cur={local_hour:.2f} src={src}"
+    return ok, f"peak={peak} window=[{lo:.1f},{hi:.1f}] cur={local_hour:.2f} src=window_table"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -652,9 +674,10 @@ def _try_auto_execute(cand, packet: dict, decision: dict,
       1. Direction-specific toggle ON (AUTO_EXECUTE_BUY_<NO|YES>_PUSH)
       2. decision.edge >= PUSH_MIN_EDGE_PP/100 (raised from pure_nn_decide's
          shadow-log floor of 6pp to filter marginal-edge bottom-tail trades).
-      3. (station, series, hour) inside [peak-PUSH_PEAK_HOURS_BEFORE,
-         peak+PUSH_PEAK_HOURS_AFTER] using empirical per-(station, month)
-         peak/min hour from pace_curves.
+      3. (station, series, hour) inside the per-(station, series, month)
+         window from push_window_overrides.PUSH_WINDOW_OVERRIDES (the SOLE
+         window source as of 2026-05-21; no default fallback -- a missing cell
+         is not traded + Discord-alerted). Peak hour from _lookup_peak_hour.
       4. Entry ask is within [PUSH_MIN_ENTRY_C, PUSH_MAX_ENTRY_C].
       5. No existing position on this exact ticker.
       6. Open position count for (station, series_prefix, direction)

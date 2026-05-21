@@ -11,6 +11,7 @@ import sys
 import os
 import unittest
 import re
+import types
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -39,7 +40,7 @@ class TestPushWindowOverrides(unittest.TestCase):
                 ok, dbg = nsw._in_decision_window("KATL", "HIGH", 15.2,
                                                   "2026-05-19")
         self.assertTrue(ok, dbg)
-        self.assertIn("src=override", dbg)
+        self.assertIn("src=window_table", dbg)
         # 14.0 should be inside whatever the override window is for ATL HIGH May
         m = re.search(r"window=\[(-?[\d.]+),(-?[\d.]+)\]", dbg)
         self.assertIsNotNone(m)
@@ -58,36 +59,40 @@ class TestPushWindowOverrides(unittest.TestCase):
                 ok, dbg = nsw._in_decision_window("KATL", "HIGH", 18.0,
                                                   "2026-05-19")
         self.assertFalse(ok, dbg)
-        self.assertIn("src=override", dbg)
+        self.assertIn("src=window_table", dbg)
 
-    def test_fallback_when_flag_off(self):
-        """USE_PUSH_WINDOW_OVERRIDES=False → global PUSH_PEAK_HOURS_*.
-        peak=15.883, before=1.0, after=0.5 → window [14.883, 16.383]."""
+    def test_kill_switch_when_flag_off(self):
+        """USE_PUSH_WINDOW_OVERRIDES=False → master kill-switch: no trade, no
+        window, no alert (intentional, not a data gap)."""
         with mock.patch.dict("sys.modules"):
             import importlib
             cfg = importlib.import_module("config")
             with mock.patch.object(cfg, "USE_PUSH_WINDOW_OVERRIDES", False):
-                ok, dbg = nsw._in_decision_window("KATL", "HIGH", 13.5,
+                ok, dbg = nsw._in_decision_window("KATL", "HIGH", 15.0,
                                                   "2026-05-19")
-        # 14.0 < 14.883 → outside global window
         self.assertFalse(ok, dbg)
-        self.assertIn("src=global", dbg)
+        self.assertIn("push_window_system_disabled", dbg)
 
-    def test_fallback_when_cell_missing(self):
-        """Robust to override-dict regen: monkey-patch PUSH_WINDOW_OVERRIDES
-        to empty dict, then verify fallback."""
+    def test_missing_cell_no_trade_and_alert(self):
+        """Cell absent from window table → NOT traded + missing-window alert
+        fires once (deduped). No default-window fallback."""
         import push_window_overrides as pwo
         nsw._lookup_peak_hour = lambda *a, **kw: 5.367  # KATL LOW May frac
-        with mock.patch.dict("sys.modules"):
+        nsw._window_alert_seen.clear()
+        captured = []
+        fake_pjb = types.ModuleType("paper_judge_bot")
+        fake_pjb.discord_send = lambda m: captured.append(m)
+        with mock.patch.dict("sys.modules", {"paper_judge_bot": fake_pjb}):
             import importlib
             cfg = importlib.import_module("config")
             with mock.patch.object(cfg, "USE_PUSH_WINDOW_OVERRIDES", True), \
                  mock.patch.object(pwo, "PUSH_WINDOW_OVERRIDES", {}):
-                ok, dbg = nsw._in_decision_window("KATL", "LOW", 5.0,
-                                                  "2026-05-19")
-        # peak=5.367, global LOW window [-1.0, +0.5] = [4.367, 5.867]; h=5.0 inside
-        self.assertTrue(ok, dbg)
-        self.assertIn("src=global", dbg)
+                ok, dbg = nsw._in_decision_window("KATL", "LOW", 5.0, "2026-05-19")
+                nsw._in_decision_window("KATL", "LOW", 5.0, "2026-05-19")  # dedup
+        self.assertFalse(ok, dbg)
+        self.assertIn("no_window_defined", dbg)
+        self.assertEqual(len(captured), 1, captured)
+        self.assertIn("PUSH WINDOW MISSING", captured[0])
 
     def test_override_month_resolved_from_climate_day(self):
         """Different month uses different override; lookup picks via climate_day."""
@@ -98,7 +103,7 @@ class TestPushWindowOverrides(unittest.TestCase):
             with mock.patch.object(cfg, "USE_PUSH_WINDOW_OVERRIDES", True):
                 ok, dbg = nsw._in_decision_window("KATL", "HIGH", 14.0,
                                                   "2026-01-15")
-        self.assertIn("src=override", dbg)
+        self.assertIn("src=window_table", dbg)
         # 13.0 should be in the ATL HIGH Jan window (range check)
         m = re.search(r"window=\[(-?[\d.]+),(-?[\d.]+)\]", dbg)
         lo, hi = float(m.group(1)), float(m.group(2))

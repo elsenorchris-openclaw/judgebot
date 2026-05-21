@@ -491,21 +491,16 @@ SHADOW_NN_EVENT_DRIVEN: bool = True
 AUTO_EXECUTE_BUY_NO_PUSH: bool = True
 AUTO_EXECUTE_BUY_YES_PUSH: bool = True
 
-# Peak-relative window offsets (in hours). Window is open when:
-#   peak_hour - PUSH_PEAK_HOURS_BEFORE  <=  local_hour  <=  peak_hour + (HIGH|LOW after)
-PUSH_PEAK_HOURS_BEFORE: float = 1.0
-# 2026-05-19 push v2: asymmetric post-peak. LOW markets close shortly after the
-# daily LOW resolves, so post-peak BUYs hit the 30-min-to-close guardrail.
-# HIGH markets generally have more time. Per Chris: LOW after = 0.5h.
-PUSH_PEAK_HOURS_AFTER_HIGH: float = 0.5
-PUSH_PEAK_HOURS_AFTER_LOW: float = 0.5
-PUSH_PEAK_HOURS_AFTER: float = 0.5  # deprecated, kept for compat reads
-
-# Per-(station, series, month) override of the push decision window.
-# When True, nn_shadow_worker._in_decision_window consults
-# push_window_overrides.PUSH_WINDOW_OVERRIDES first; cells absent from the
-# dict fall back to PUSH_PEAK_HOURS_BEFORE / AFTER_<HIGH|LOW>. Map generated
-# from /home/ubuntu/data/phq_combined.csv (800-day backtest, 2026-05-19).
+# 2026-05-21: the push decision window comes SOLELY from the per-(station,
+# series, month) window table in push_window_overrides.PUSH_WINDOW_OVERRIDES.
+# There is NO default-window fallback -- it was removed to eliminate a confusing
+# second source of truth and silent guessing on un-validated cells. A cell
+# missing from the table is NOT traded and fires a Discord alert
+# (nn_shadow_worker._alert_missing_window). The old global defaults
+# PUSH_PEAK_HOURS_BEFORE / AFTER_HIGH / AFTER_LOW / AFTER were removed.
+# USE_PUSH_WINDOW_OVERRIDES is now a master kill-switch: True (default) = the
+# table is the sole window source; False = push window system OFF (no trades,
+# no alert). Table generated from /home/ubuntu/data/phq_combined.csv backtest.
 USE_PUSH_WINDOW_OVERRIDES: bool = True
 
 # Fractional peak source for nn_shadow_worker._lookup_peak_hour.
