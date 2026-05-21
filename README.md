@@ -4,6 +4,74 @@ A judgment-first Kalshi trading bot for daily weather markets. Claude is the
 entry+exit decision-maker; deterministic guardrails wrap the LLM so the
 worst-case blast radius is bounded by code, not by prompt quality.
 
+## LOW cold-front gate — 2026-05-21 21:28 UTC
+
+The pure-nn push path now skips **LOW** buys when sustained wind at the
+overnight low signals a frontal / cold-air-advection regime. Distinct from
+the Tier 1 wind gate (40 mph, both sides, catastrophic) — this fires far
+lower (≈ 15 kt) and LOW-side only.
+
+**Why.** 25-yr backtest of the nn matcher's own accuracy (3.17M evals,
+`~/data/phq_offset_cond_combined.csv`, conditioned on 18 observable regime
+buckets):
+- **HIGH is storm-robust** — MAE flat (~1.4-1.6 °F) across every storm
+  regime, no systematic bias. No new HIGH gate is justified; the existing
+  Tier 1 gate covers its catastrophic tail.
+- **LOW collapses under sustained wind.** With METAR sustained wind > 15 kt
+  in the trade window, the matcher's MAE jumps to 3.1-4.3 °F (vs ~1.7 °F
+  calm) and it carries a **systematic bias of +1.6 to +3.1 °F** in the cold
+  season — it over-projects the daily minimum, because a frontal passage
+  delivers a much colder low than the warm pre-frontal trajectory implies.
+  Cross-year validated (train < 2024 vs holdout 2024-25); holds at 18 of 20
+  stations.
+- **Sigma does not flag it.** ~68% of the badly-over-projected LOW rows are
+  NOT in the matcher's high-sigma bucket; within sigma=low, sustained wind
+  still drives bias to +1.25 °F. Sigma widening protects against variance,
+  not against a biased mean — so the bot would otherwise compute a confident
+  edge off a wrong center. That is why this is a hard gate, not a sizing
+  tweak (the global regime-MAE sizing already shrinks the bet, but cannot
+  re-center it).
+- Pressure tendency, temperature volatility, and slope were tested and
+  rejected as noise (falling pressure is just the normal diurnal cycle).
+
+**Gate** (`tier1`-sibling block `(2c)` in
+`nn_shadow_worker._try_auto_execute`, fires right after the Tier 1 wind
+gate, before the price floor):
+
+- `low_frontal_wind`: `series == "LOW"` AND
+  `wethr_obs.wind_speed_mph >= PUSH_LOW_FRONT_WIND_MPH` (default 18 mph
+  ≈ 15 kt). **Sustained wind only** — a gust without sustained wind is
+  convective (thunderstorm outflow), not a frontal cold-air advection, and
+  does not carry the bias.
+- `PUSH_LOW_FRONT_EXCLUDE` (default `("KLAX", "KMIA")`) — marine-climate
+  stations where strong wind is onshore sea-breeze, not a cold front
+  (backtest bias ≈ 0 there in both seasons).
+
+**Discord alert.** When the gate blocks a would-be LOW buy it fires a
+throttled Discord alert (`_alert_low_front`), deduped per
+`(station, climate_day)` — one message per station per day, e.g.
+`⛔ LOW COLD-FRONT GATE KMSP 2026-01-15: skipping LOW push BUYs — sustained
+wind 24mph (≥18mph). Matcher over-projects the low in frontal regimes.`
+Firing rate ≈ 3.8% of LOW evals/year (5-6% in cold-season months, ~1% in
+summer).
+
+**Disable knob:** set `PUSH_LOW_FRONT_WIND_MPH = 0` (or negative) in
+`config.py` and restart.
+
+**Files:**
+- `config.py` — adds `PUSH_LOW_FRONT_WIND_MPH = 18.0`,
+  `PUSH_LOW_FRONT_EXCLUDE = ("KLAX", "KMIA")`.
+- `nn_shadow_worker.py` — new gate-2c block in `_try_auto_execute` plus the
+  throttled `_alert_low_front` Discord helper.
+- `tests/test_low_front_gate.py` — 10 new tests (threshold boundary,
+  HIGH-unaffected, excluded stations, missing-wind fail-open, zero-disable,
+  Discord-alert dedup).
+
+Full suite 416 passed / 4 skipped / 1 pre-existing unrelated fail
+(`test_truncation_reduces_buy_no_edge_when_rm_in_yes`). Commit 8dd3dcf.
+Backups `config.py.pre_lowfront_gate_20260521`,
+`nn_shadow_worker.py.pre_lowfront_gate_20260521`.
+
 ## Window table is the SOLE window source (no default fallback) — 2026-05-21 20:55 UTC
 
 `push_window_overrides.PUSH_WINDOW_OVERRIDES` is now the ONLY source of the
