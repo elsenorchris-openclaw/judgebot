@@ -491,6 +491,8 @@ SHADOW_NN_EVENT_DRIVEN: bool = True
 AUTO_EXECUTE_BUY_NO_PUSH: bool = True
 AUTO_EXECUTE_BUY_YES_PUSH: bool = True
 AUTO_EXEC_LOW_ENABLED: bool = False   # 2026-05-22 PAUSED per Chris -- LOW over-trades pre-dawn into illiquid books (phantom MTM). Set True to resume.
+PUSH_HIGH_MAX_BET_DEFAULT: float = 3.0       # 2026-05-22 per Chris: $3 HIGH cap for all cells...
+PUSH_HIGH_MAX_BET_BY_STATION = {"KNYC": 5.0, "KMIA": 5.0}  # ...except NYC/MIA (cross-validated edge cells) keep $5
 
 # 2026-05-21: the push decision window comes SOLELY from the per-(station,
 # series, month) window table in push_window_overrides.PUSH_WINDOW_OVERRIDES.

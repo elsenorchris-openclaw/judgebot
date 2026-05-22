@@ -1348,7 +1348,10 @@ def _evaluate_ticker(ticker: str, trigger: str) -> None:
         # 2026-05-21: LOW cut to $1 (max_bet_low_series_usd) — losing book.
         _gr = getattr(_cfg, "GUARDRAILS", {}) or {}
         _is_high_sizing = (cand.series_prefix == "KXHIGH")
-        _series_cap_usd = float(_gr.get("max_bet_high_series_usd", 5.0)) if _is_high_sizing \
+        # 2026-05-22: per-station HIGH cap -- NYC/MIA (edge cells) $5, all others $3.
+        _high_cap = float(getattr(_cfg, "PUSH_HIGH_MAX_BET_BY_STATION", {}).get(
+            cand.station, getattr(_cfg, "PUSH_HIGH_MAX_BET_DEFAULT", 3.0)))
+        _series_cap_usd = _high_cap if _is_high_sizing \
             else float(_gr.get("max_bet_low_series_usd", 5.0))
         # Min-buy floor: LOW uses a smaller floor so a $1 cap doesn't collapse
         # the integer-contract math (min_buy == cap => nothing fits). HIGH keeps
@@ -1395,7 +1398,7 @@ def _evaluate_ticker(ticker: str, trigger: str) -> None:
         decision = nn_shadow_strategy.pure_nn_decide(
             pkt, ticker_remaining_usd=ticker_remaining, edge_max=1.0,
             min_buy_usd=_min_buy_usd,
-            series_cap_high_usd=float(_gr.get("max_bet_high_series_usd", 5.0)),
+            series_cap_high_usd=_high_cap,
             series_cap_low_usd=float(_gr.get("max_bet_low_series_usd", 5.0)),
         )
 
