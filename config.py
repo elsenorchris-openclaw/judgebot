@@ -572,6 +572,7 @@ PUSH_HIGH_TEMP_WINDOW_BY_STATION = {
 # station's OWN min time. (before, after): window = [min-before, min+after].
 # Reversible: set PUSH_LOW_TEMP_WINDOW=None to revert all LOW to the overrides.
 PUSH_LOW_TEMP_WINDOW = (0.5, 1.5)
+PUSH_TEMP_WINDOW_MONTHS = {5}   # 2026-05-22: months the per-station temp windows are active (May = profit-optimized). Other months fall to the month-keyed PUSH_WINDOW_OVERRIDES table.
 PUSH_LOW_TEMP_WINDOW_BY_STATION = {}
 
 # 2026-05-21: per-cell MEDIAN bias correction (HIGH only) + MAE-based confidence

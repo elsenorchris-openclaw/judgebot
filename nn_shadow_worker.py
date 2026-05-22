@@ -694,7 +694,7 @@ def _in_decision_window(station: str, series: str, local_hour: float,
     # Reversible via config.PUSH_HIGH_TEMP_WINDOW=None. Superseded by per-(station,
     # month) regen once the full historical backfill lands.
     _temp_win = getattr(_cfg, "PUSH_HIGH_TEMP_WINDOW", None)
-    if series == "HIGH" and _temp_win:
+    if series == "HIGH" and _temp_win and month in getattr(_cfg, "PUSH_TEMP_WINDOW_MONTHS", {5}):
         # 2026-05-22: per-station HIGH window (price-gated backtest, v1).
         # Looked up first; station absent -> global temp window above.
         # Reversible by clearing PUSH_HIGH_TEMP_WINDOW_BY_STATION.
@@ -702,7 +702,7 @@ def _in_decision_window(station: str, series: str, local_hour: float,
         _w = _by_stn.get(station, _temp_win)
         before, after = float(_w[0]), float(_w[1])
     _low_temp = getattr(_cfg, "PUSH_LOW_TEMP_WINDOW", None)
-    if series == "LOW" and _low_temp:
+    if series == "LOW" and _low_temp and month in getattr(_cfg, "PUSH_TEMP_WINDOW_MONTHS", {5}):
         # 2026-05-22: LOW placeholder window. MAE-built LOW overrides open
         # too deep pre-min (h2pk>=2.0 = 40% WR faithful); good zone is
         # near/post-min (65%). Placeholder until LOW candles land for a
