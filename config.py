@@ -541,7 +541,7 @@ PUSH_EARLY_TRIM_MAE_MAX: float = 1.6      # only "accurate" cells (full-size tie
 # early-trim OFF (below) since before=3.0 would otherwise be capped. Reversible:
 # set to None (and re-enable trim) to revert. Superseded by the per-(station,
 # month) regen once the full multi-year backfill lands. HIGHER VARIANCE (31% win).
-PUSH_HIGH_TEMP_WINDOW = (3.0, -2.0)   # (before, after) hours vs peak; None = off
+PUSH_HIGH_TEMP_WINDOW = (1.5, -1.0)   # (before, after) hours vs peak; None = off
 
 # 2026-05-22: per-station HIGH window overrides (v1, price-gated backtest, May
 # 2026 only; thin n~8-11/band -> regenerate from the deep historical backfill).

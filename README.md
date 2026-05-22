@@ -4,6 +4,14 @@ A judgment-first Kalshi trading bot for daily weather markets. Claude is the
 entry+exit decision-maker; deterministic guardrails wrap the LLM so the
 worst-case blast radius is bounded by code, not by prompt quality.
 
+## HIGH default window -> [peak-1.5, peak-1.0] — 2026-05-22
+
+`PUSH_HIGH_TEMP_WINDOW` (3.0,-2.0) -> (1.5,-1.0): the global HIGH default (used by
+the 12 non-backtested cells) moves from deep-pre-peak `[peak-3,peak-2]` to
+moderate-pre-peak `[peak-1.5,peak-1.0]`. Per Chris. NOTE: aggregate faithful data
+leans toward the deeper zone (h2pk 2-3) outperforming 1-1.5h, so this may
+underperform on those cells until they get their own backtested windows. Reversible.
+
 ## LOW placeholder windows (near/post-min) — 2026-05-22
 
 `PUSH_LOW_TEMP_WINDOW = (0.5, 1.5)` -> all 20 LOW windows become `[min-0.5, min+1.5]`
