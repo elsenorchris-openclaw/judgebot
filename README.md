@@ -4,6 +4,23 @@ A judgment-first Kalshi trading bot for daily weather markets. Claude is the
 entry+exit decision-maker; deterministic guardrails wrap the LLM so the
 worst-case blast radius is bounded by code, not by prompt quality.
 
+## Live-era per-station HIGH BUY_NO windows + NYC dropped from $30 — 2026-05-22
+
+Replaced the per-station HIGH temp windows with a LIVE-era (2026-03-15+, all 19
+stations) profit sweep. Finding: BUY_NO is +EV DEEP pre-peak and LOSES in the
+final hour into peak (pooled [peak-2,peak-1] +3.0c/bet, both date-halves positive;
+any window trading into peak is negative). So every per-station window now CLOSES
+>=1h before peak, with the open profit-optimized per station (faithful gated
+buy-at-open sim, early/late split as a confidence flag). `PUSH_HIGH_TEMP_WINDOW`
+global fallback -> (2.0,-1.0) for stations without their own data (e.g. DCA). Dict
+flags: ROBUST (both halves +, 9 cells), SOFT (one half -, DFW/LAX), THIN (HOU n=12),
+fallback (7 low-volume stations). **NYC dropped from the $30 sizing** — live-era NYC
+NO is only ~breakeven (+2.8 on its own window) so it trades at base $5; only MIA
+(robust in BOTH the historical and live eras) keeps $30. The cross-year HISTORICAL
+data had looked thin / NYC-MIA-only; the live era (current matcher) shows a broader
+deep-pre-peak NO edge. Reversible (config). Tools: tools/window_side.py,
+tools/window_wr.py.
+
 ## NYC/MIA BUY_NO sized to $30 — 2026-05-22
 
 `PUSH_HIGH_NO_BET_BY_STATION = {"KNYC": 30, "KMIA": 30}`. NYC and MIA BUY_NO are

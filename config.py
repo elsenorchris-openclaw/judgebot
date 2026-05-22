@@ -493,7 +493,7 @@ AUTO_EXECUTE_BUY_YES_PUSH: bool = True
 AUTO_EXEC_LOW_ENABLED: bool = False   # 2026-05-22 PAUSED per Chris -- LOW over-trades pre-dawn into illiquid books (phantom MTM). Set True to resume.
 PUSH_HIGH_MAX_BET_DEFAULT: float = 3.0       # 2026-05-22 per Chris: $3 HIGH cap for all cells...
 PUSH_HIGH_MAX_BET_BY_STATION = {"KNYC": 5.0, "KMIA": 5.0}  # ...except NYC/MIA (cross-validated edge cells) keep $5
-PUSH_HIGH_NO_BET_BY_STATION = {"KNYC": 30.0, "KMIA": 30.0}  # 2026-05-22 (Chris): the one OOS-robust HIGH edge (NYC/MIA BUY_NO) sizes up to $30; applied after the decision in nn_shadow_worker for BUY_NO only — YES side + all other cells keep PUSH_HIGH_MAX_BET_BY_STATION.
+PUSH_HIGH_NO_BET_BY_STATION = {"KMIA": 30.0}  # 2026-05-22 (Chris): MIA BUY_NO (robust both eras) sizes up to $30. NYC DROPPED — live-era NYC NO is only ~breakeven (+2.8 on its own window), so it trades at base $5. Applied after the decision in nn_shadow_worker for BUY_NO only.
 
 # 2026-05-21: the push decision window comes SOLELY from the per-(station,
 # series, month) window table in push_window_overrides.PUSH_WINDOW_OVERRIDES.
@@ -545,7 +545,7 @@ PUSH_EARLY_TRIM_MAE_MAX: float = 1.6      # only "accurate" cells (full-size tie
 # early-trim OFF (below) since before=3.0 would otherwise be capped. Reversible:
 # set to None (and re-enable trim) to revert. Superseded by the per-(station,
 # month) regen once the full multi-year backfill lands. HIGHER VARIANCE (31% win).
-PUSH_HIGH_TEMP_WINDOW = (1.5, -1.0)   # (before, after) hours vs peak; None = off
+PUSH_HIGH_TEMP_WINDOW = (2.0, -1.0)   # (before, after) hrs vs peak; None=off. 2026-05-22: broad [peak-2,peak-1] fallback (pooled +3.0c/bet, both halves +) for stations not in BY_STATION (e.g. DCA).
 
 # 2026-05-22: per-station HIGH window overrides (v1, price-gated backtest, May
 # 2026 only; thin n~8-11/band -> regenerate from the deep historical backfill).
@@ -554,15 +554,30 @@ PUSH_HIGH_TEMP_WINDOW = (1.5, -1.0)   # (before, after) hours vs peak; None = of
 # all HIGH to the global. (before, after) hrs vs fractional peak; window =
 # [peak-before, peak+after]. AUS sits near-peak -- it LOSES deep pre-peak.
 PUSH_HIGH_TEMP_WINDOW_BY_STATION = {
-    "KATL": (2.0, -1.5),
-    "KAUS": (1.0, -0.5),   # deep regen 2026-05-22: n=11 55% +1.4
-    "KLAX": (3.5, -3.0),   # deep regen 2026-05-22: n=21 48% -1.6 (marginal)
-    "KBOS": (3.0, -2.5),
-    "KMDW": (2.0, -1.5),   # deep regen 2026-05-22: n=30 50% -2.5 (marginal)
-    "KMIA": (2.5, -2.0),
-    "KNYC": (3.5, -3.0),
-    "KPHL": (2.5, -2.0),
-    "KPHX": (3.0, -2.5),
+    # 2026-05-22 live-era (2026-03-15+) per-station BUY_NO profit sweep (faithful
+    # gated buy-at-open, early/late split). (before, after) = [peak-before,
+    # peak+after]; ALL close before peak (trading into peak is the losing zone).
+    # Flags: ROBUST = +PnL both halves n>=15; SOFT = one half negative; THIN =
+    # n<15; fallback = no own n>=10 -> broad (2.0,-1.0).
+    "KATL": (3.0, -1.5),   # ROBUST  n=30 +5.6
+    "KAUS": (2.0, -1.0),   # ROBUST  n=24 +7.7
+    "KBOS": (2.0, -1.5),   # ROBUST  n=25 +20.4
+    "KDEN": (1.5, -1.0),   # ROBUST  n=38 +2.9
+    "KDFW": (3.0, -1.5),   # SOFT    n=20 +2.1 (late half -3.0 -> watch, overfit risk)
+    "KHOU": (3.0, -1.5),   # THIN    n=12 +5.5
+    "KLAS": (2.0, -1.0),   # fallback (insufficient own data)
+    "KLAX": (3.0, -1.5),   # SOFT    n=34 +8.8 (late half -0.4)
+    "KMDW": (1.5, -1.0),   # ROBUST  n=41 +10.2
+    "KMIA": (2.0, -1.5),   # ROBUST  n=31 +12.9
+    "KMSP": (2.0, -1.0),   # fallback
+    "KMSY": (2.0, -1.0),   # fallback
+    "KNYC": (2.0, -1.5),   # ROBUST  n=45 +2.8 (dropped from $30 sizing -> base $5)
+    "KOKC": (2.0, -1.0),   # fallback
+    "KPHL": (2.0, -1.5),   # ROBUST  n=35 +2.1
+    "KPHX": (3.0, -1.0),   # ROBUST  n=20 +14.4
+    "KSAT": (2.0, -1.0),   # fallback
+    "KSEA": (2.0, -1.0),   # fallback
+    "KSFO": (2.0, -1.0),   # fallback
 }
 
 # 2026-05-22: LOW placeholder window (analog to PUSH_HIGH_TEMP_WINDOW). The
