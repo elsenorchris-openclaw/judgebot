@@ -139,6 +139,38 @@ class TestPushWindowOverrides(unittest.TestCase):
             self.assertGreater(mae, 0.0, f"mae {mae} should be positive")
 
 
+
+class TestLowTempWindow(unittest.TestCase):
+    """2026-05-22: LOW placeholder window (PUSH_LOW_TEMP_WINDOW) overrides the
+    MAE-built LOW overrides, anchored to each station's min. Gated behind the
+    flag being set + the cell having a base override (else no-trade)."""
+
+    def setUp(self):
+        self._orig = nsw._lookup_peak_hour
+        nsw._lookup_peak_hour = lambda station, series, climate_day: 7.0
+        import config as _c
+        self._t = mock.patch.object(_c, "PUSH_LOW_TEMP_WINDOW", (0.5, 1.5))
+        self._u = mock.patch.object(_c, "USE_PUSH_WINDOW_OVERRIDES", True)
+        self._t.start(); self._u.start()
+
+    def tearDown(self):
+        nsw._lookup_peak_hour = self._orig
+        self._t.stop(); self._u.stop()
+
+    def _win(self, station, hour):
+        ok, dbg = nsw._in_decision_window(station, "LOW", hour, "2026-05-19")
+        m = re.search(r"window=\[(-?[\d.]+),(-?[\d.]+)\]", dbg)
+        return ok, (float(m.group(1)), float(m.group(2))) if m else None, dbg
+
+    def test_low_temp_window_applied(self):
+        ok, win, dbg = self._win("KAUS", 7.0)  # min=7.0, (0.5,1.5) -> [6.5,8.5]
+        self.assertEqual(win, (6.5, 8.5), dbg)
+        self.assertTrue(ok, dbg)
+
+    def test_low_temp_excludes_deep_pre_min(self):
+        ok, win, dbg = self._win("KAUS", 4.5)  # min-2.5, deep pre-min -> outside
+        self.assertFalse(ok, dbg)
+
 if __name__ == "__main__":
     unittest.main()
 

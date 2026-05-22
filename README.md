@@ -4,6 +4,17 @@ A judgment-first Kalshi trading bot for daily weather markets. Claude is the
 entry+exit decision-maker; deterministic guardrails wrap the LLM so the
 worst-case blast radius is bounded by code, not by prompt quality.
 
+## LOW placeholder windows (near/post-min) — 2026-05-22
+
+`PUSH_LOW_TEMP_WINDOW = (0.5, 1.5)` -> all 20 LOW windows become `[min-0.5, min+1.5]`
+(offset global, anchored to each station's own min), replacing the MAE-built LOW
+overrides. Those mostly opened 2.5-4h before the min, but the faithful trades show
+deep-pre-min (h2pk>=2.0) is the WEAK zone (40% WR, n=5) while near/post-min is good
+(65%, n=23). Mechanism mirrors PUSH_HIGH_TEMP_WINDOW (resolved in
+`_in_decision_window`, gated behind a base override existing). **Placeholder on thin
+data** -- replaced per-cell by the LOW price-gated backtest once the LOW candle
+backfill lands. Reversible: PUSH_LOW_TEMP_WINDOW=None.
+
 ## LOW cap $5 + h2pk gate disabled — 2026-05-22
 
 Two push-entry tweaks:

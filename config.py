@@ -560,6 +560,16 @@ PUSH_HIGH_TEMP_WINDOW_BY_STATION = {
     "KPHX": (3.0, -2.5),
 }
 
+# 2026-05-22: LOW placeholder window (analog to PUSH_HIGH_TEMP_WINDOW). The
+# MAE-built LOW overrides open too deep pre-min (h2pk>=2.0 = 40% WR in faithful
+# trades); the good zone is near/post-min (65%). This near/post-min placeholder
+# replaces all 20 LOW windows until the LOW candle backfill lands for a proper
+# price-gated per-cell regen. The offset is global but anchored to each
+# station's OWN min time. (before, after): window = [min-before, min+after].
+# Reversible: set PUSH_LOW_TEMP_WINDOW=None to revert all LOW to the overrides.
+PUSH_LOW_TEMP_WINDOW = (0.5, 1.5)
+PUSH_LOW_TEMP_WINDOW_BY_STATION = {}
+
 # 2026-05-21: per-cell MEDIAN bias correction (HIGH only) + MAE-based confidence
 # sizing. Both consume push_window_overrides 4-tuples (before, after, bias, mae)
 # and apply in nn_shadow_worker._evaluate_ticker. Out-of-sample validated
