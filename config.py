@@ -380,7 +380,7 @@ GUARDRAILS = {
     # 2026-05-20: raised 5 -> 15 (Chris directive). HIGH is the profitable book
     # (+$40 on 5/20 vs LOW -$24); lean bet size into it. pure_nn_decide sizing
     # reads this same value via the worker so qty is sized to match the cap.
-    "max_bet_high_series_usd": 15.0,
+    "max_bet_high_series_usd": 5.0,  # 2026-05-22 lowered 15->5 per Chris (all judge positions <=$5)
     # 2026-05-16 (evening): LOW-series brackets (KXLOW-*) capped at $5 alongside
     # HIGH while validating the nn_match k-NN heating-curve projector as the
     # primary μ source. Symmetric to max_bet_high_series_usd; applied at
