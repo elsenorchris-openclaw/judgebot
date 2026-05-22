@@ -695,7 +695,12 @@ def _in_decision_window(station: str, series: str, local_hour: float,
     # month) regen once the full historical backfill lands.
     _temp_win = getattr(_cfg, "PUSH_HIGH_TEMP_WINDOW", None)
     if series == "HIGH" and _temp_win:
-        before, after = float(_temp_win[0]), float(_temp_win[1])
+        # 2026-05-22: per-station HIGH window (price-gated backtest, v1).
+        # Looked up first; station absent -> global temp window above.
+        # Reversible by clearing PUSH_HIGH_TEMP_WINDOW_BY_STATION.
+        _by_stn = getattr(_cfg, "PUSH_HIGH_TEMP_WINDOW_BY_STATION", None) or {}
+        _w = _by_stn.get(station, _temp_win)
+        before, after = float(_w[0]), float(_w[1])
     # 2026-05-21: early-side trim for HIGH accurate-but-wide cells. The window
     # table is built on MAE (mu accuracy), but accuracy != PnL: in the ~40 HIGH
     # cells that are accurate (mae < MAE_MAX) yet open >1h before peak, the

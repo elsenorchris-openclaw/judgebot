@@ -141,3 +141,44 @@ class TestPushWindowOverrides(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestPerStationTempWindow(unittest.TestCase):
+    """2026-05-22: per-station HIGH temp windows (PUSH_HIGH_TEMP_WINDOW_BY_STATION)
+    are looked up before the global PUSH_HIGH_TEMP_WINDOW; a station absent from
+    the dict falls back to that global. Gated behind the global being set."""
+
+    def setUp(self):
+        self._orig = nsw._lookup_peak_hour
+        nsw._lookup_peak_hour = lambda station, series, climate_day: 15.0
+        import config as _c
+        self._g = mock.patch.object(_c, "PUSH_HIGH_TEMP_WINDOW", (3.0, -2.0))
+        self._s = mock.patch.object(_c, "PUSH_HIGH_TEMP_WINDOW_BY_STATION",
+                                    {"KAUS": (1.5, -1.0)})
+        self._u = mock.patch.object(_c, "USE_PUSH_WINDOW_OVERRIDES", True)
+        self._g.start(); self._s.start(); self._u.start()
+
+    def tearDown(self):
+        nsw._lookup_peak_hour = self._orig
+        self._g.stop(); self._s.stop(); self._u.stop()
+
+    def _win(self, station, hour):
+        ok, dbg = nsw._in_decision_window(station, "HIGH", hour, "2026-05-19")
+        m = re.search(r"window=\[(-?[\d.]+),(-?[\d.]+)\]", dbg)
+        win = (float(m.group(1)), float(m.group(2))) if m else None
+        return ok, win, dbg
+
+    def test_station_in_dict_uses_its_window(self):
+        ok, win, dbg = self._win("KAUS", 13.7)  # KAUS (1.5,-1.0) -> [13.5,14.0]
+        self.assertEqual(win, (13.5, 14.0), dbg)
+        self.assertTrue(ok, dbg)
+
+    def test_per_station_overrides_global(self):
+        # 12.5 is in the GLOBAL [12.0,13.0] but NOT KAUS's [13.5,14.0]
+        ok, win, dbg = self._win("KAUS", 12.5)
+        self.assertFalse(ok, dbg)
+
+    def test_station_absent_falls_back_to_global(self):
+        ok, win, dbg = self._win("KBOS", 12.5)  # not in dict -> [12.0,13.0]
+        self.assertEqual(win, (12.0, 13.0), dbg)
+        self.assertTrue(ok, dbg)

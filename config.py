@@ -543,6 +543,23 @@ PUSH_EARLY_TRIM_MAE_MAX: float = 1.6      # only "accurate" cells (full-size tie
 # month) regen once the full multi-year backfill lands. HIGHER VARIANCE (31% win).
 PUSH_HIGH_TEMP_WINDOW = (3.0, -2.0)   # (before, after) hours vs peak; None = off
 
+# 2026-05-22: per-station HIGH window overrides (v1, price-gated backtest, May
+# 2026 only; thin n~8-11/band -> regenerate from the deep historical backfill).
+# Looked up before the global PUSH_HIGH_TEMP_WINDOW above; a station ABSENT here
+# falls back to that global deep default. Reversible: set to None/{} to revert
+# all HIGH to the global. (before, after) hrs vs fractional peak; window =
+# [peak-before, peak+after]. AUS sits near-peak -- it LOSES deep pre-peak.
+PUSH_HIGH_TEMP_WINDOW_BY_STATION = {
+    "KATL": (2.0, -1.5),
+    "KAUS": (1.5, -1.0),
+    "KBOS": (3.0, -2.5),
+    "KMDW": (2.5, -2.0),
+    "KMIA": (2.5, -2.0),
+    "KNYC": (3.5, -3.0),
+    "KPHL": (2.5, -2.0),
+    "KPHX": (3.0, -2.5),
+}
+
 # 2026-05-21: per-cell MEDIAN bias correction (HIGH only) + MAE-based confidence
 # sizing. Both consume push_window_overrides 4-tuples (before, after, bias, mae)
 # and apply in nn_shadow_worker._evaluate_ticker. Out-of-sample validated
