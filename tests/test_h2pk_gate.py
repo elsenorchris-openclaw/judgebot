@@ -48,10 +48,16 @@ class TestH2pkGate(unittest.TestCase):
         self._orig_window = nsw._in_decision_window
         nsw._in_decision_window = lambda *a, **kw: (True, "test-window")
         nsw._rt = SimpleNamespace(positions={}, cycle_buys_by_station_side={})
+        # Production default is now None (gate disabled 2026-05-22); these
+        # tests validate the gate LOGIC, so force it on at 0.5.
+        import config as _cfg
+        self._h2 = mock.patch.object(_cfg, "PUSH_MIN_H_TO_PEAK_HIGH", 0.5)
+        self._h2.start()
 
     def tearDown(self):
         nsw._rt = self._orig_rt
         nsw._in_decision_window = self._orig_window
+        self._h2.stop()
 
     def _run(self, cand, packet, decision, series="HIGH"):
         import paper_judge_bot as pjb
@@ -138,6 +144,17 @@ class TestH2pkGate(unittest.TestCase):
                                           _make_decision("BUY_NO"))
         self.assertNotIn("h2pk_too_low", reason)
 
+
+    def test_gate_disabled_when_none(self):
+        """PUSH_MIN_H_TO_PEAK_HIGH=None disables the gate (2026-05-22): an
+        at-peak HIGH entry is NOT blocked by h2pk -- windows control timing."""
+        import config as _cfg
+        cand = _make_candidate("KXHIGHMIA-26MAY20-B86.5", "KMIA",
+                                "KXHIGH", "2026-05-20")
+        with mock.patch.object(_cfg, "PUSH_MIN_H_TO_PEAK_HIGH", None):
+            executed, reason = self._run(cand, _make_packet(0.0),
+                                          _make_decision("BUY_NO"))
+        self.assertNotIn("h2pk_too_low", reason)
 
 if __name__ == "__main__":
     unittest.main()

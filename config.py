@@ -391,7 +391,7 @@ GUARDRAILS = {
     # smaller LOW min-buy (PUSH_MIN_BUY_USD_LOW) into pure_nn_decide so the
     # integer-contract math doesn't collapse the way $5/$5 did on 2026-05-17
     # (min_buy == series_cap => no integer qty fits => all LOW buys skip).
-    "max_bet_low_series_usd": 1.0,
+    "max_bet_low_series_usd": 5.0,  # 2026-05-22 raised 1.0->5.0: LOW is now a positive book (faithful near-min 65%, n=23)
     # Legacy single-cap field — kept for any reader unaware of side-specific
     # caps. Set to the higher of the two so generic checks don't false-positive.
     "max_bet_usd": 30.0,
@@ -627,7 +627,7 @@ PUSH_MIN_EDGE_PP: int = 12
 # h_to_peak=+0.70). Mechanism: at peak, rm ~= final max with stable
 # obs_trend_30m; mu still projects upward = systematic over-projection.
 # Set to None or 0.0 to disable.
-PUSH_MIN_H_TO_PEAK_HIGH: float = 0.5
+PUSH_MIN_H_TO_PEAK_HIGH = None  # was 0.5; DISABLED 2026-05-22 -- per-station windows now control timing (every HIGH window ends >=1h before peak, so the gate was redundant). Set back to 0.5 to re-enable.
 
 # In-bracket tail-bet gate (Gate 2). When the nn mu sits INSIDE the YES window
 # [floor-0.5, cap+0.5) but the bot picks the smaller-mass (tail) side

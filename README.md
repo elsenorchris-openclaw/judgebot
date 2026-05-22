@@ -2,7 +2,22 @@
 
 A judgment-first Kalshi trading bot for daily weather markets. Claude is the
 entry+exit decision-maker; deterministic guardrails wrap the LLM so the
-worst-case blast radius is bounded by code, ## Per-station HIGH push windows (v1) + faithful WR accumulator — 2026-05-22 05:45 UTC
+worst-case blast radius is bounded by code, not by prompt quality.
+
+## LOW cap $5 + h2pk gate disabled — 2026-05-22
+
+Two push-entry tweaks:
+- **LOW max bet $1 -> $5** (`max_bet_low_series_usd`). The faithful WR accumulator
+  (real executed trades, gold standard) shows LOW is now a positive book: near-min
+  pure-nn 65% (n=23), per-station 60-88%. The price-gated backtest reads 0% but only
+  on n=5/KPHX (LOW candle backfill barely started; it contradicts KPHX's own 88% real
+  record), so that's a coverage gap, not a signal.
+- **h2pk gate disabled** (`PUSH_MIN_H_TO_PEAK_HIGH` 0.5 -> None). The per-station HIGH
+  windows all end >=1h before peak, so the at-peak gate can never fire -- redundant
+  under the current windows. Disabled, not deleted (code guards on None); set back to
+  0.5 to re-enable.
+
+## Per-station HIGH push windows (v1) + faithful WR accumulator — 2026-05-22 05:45 UTC
 
 HIGH decision windows are now **per-station** for 8 cells, replacing the single
 global deep-pre-peak window for those stations. `PUSH_HIGH_TEMP_WINDOW_BY_STATION`
