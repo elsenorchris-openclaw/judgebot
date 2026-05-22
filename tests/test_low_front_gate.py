@@ -53,11 +53,15 @@ class TestLowFrontGate(unittest.TestCase):
         nsw._in_decision_window = lambda *a, **kw: (True, "test-window")
         nsw._rt = SimpleNamespace(positions={}, cycle_buys_by_station_side={})
         nsw._low_front_alert_seen.clear()
+        import config as _cfg
+        self._low_en = mock.patch.object(_cfg, "AUTO_EXEC_LOW_ENABLED", True)
+        self._low_en.start()
 
     def tearDown(self):
         nsw._rt = self._orig_rt
         nsw._in_decision_window = self._orig_window
         nsw._low_front_alert_seen.clear()
+        self._low_en.stop()
 
     def _run(self, cand, packet, decision, series="LOW"):
         import paper_judge_bot as pjb

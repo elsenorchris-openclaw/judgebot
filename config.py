@@ -490,6 +490,7 @@ SHADOW_NN_EVENT_DRIVEN: bool = True
 # Direction toggles ON — pure-code architecture per Chris 2026-05-19.
 AUTO_EXECUTE_BUY_NO_PUSH: bool = True
 AUTO_EXECUTE_BUY_YES_PUSH: bool = True
+AUTO_EXEC_LOW_ENABLED: bool = False   # 2026-05-22 PAUSED per Chris -- LOW over-trades pre-dawn into illiquid books (phantom MTM). Set True to resume.
 
 # 2026-05-21: the push decision window comes SOLELY from the per-(station,
 # series, month) window table in push_window_overrides.PUSH_WINDOW_OVERRIDES.

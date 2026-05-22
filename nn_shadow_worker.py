@@ -837,6 +837,10 @@ def _try_auto_execute(cand, packet: dict, decision: dict,
     toggle_attr = f"AUTO_EXECUTE_BUY_{short_dir}_PUSH"
     if not getattr(_cfg, toggle_attr, False):
         return False, f"{toggle_attr}=False"
+    # 2026-05-22: LOW auto-exec PAUSED (over-trading pre-dawn into illiquid
+    # books -> phantom MTM). Shadow-eval still logs; HIGH unaffected.
+    if series == "LOW" and not getattr(_cfg, "AUTO_EXEC_LOW_ENABLED", True):
+        return False, "low_auto_exec_paused"
     # (2) Decision window — peak-relative per (station, month, series)
     in_win, win_dbg = _in_decision_window(cand.station, series, local_hour, cand.climate_day)
     if not in_win:
