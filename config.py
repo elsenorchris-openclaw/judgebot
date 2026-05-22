@@ -551,9 +551,10 @@ PUSH_HIGH_TEMP_WINDOW = (1.5, -1.0)   # (before, after) hours vs peak; None = of
 # [peak-before, peak+after]. AUS sits near-peak -- it LOSES deep pre-peak.
 PUSH_HIGH_TEMP_WINDOW_BY_STATION = {
     "KATL": (2.0, -1.5),
-    "KAUS": (1.5, -1.0),
+    "KAUS": (1.0, -0.5),   # deep regen 2026-05-22: n=11 55% +1.4
+    "KLAX": (3.5, -3.0),   # deep regen 2026-05-22: n=21 48% -1.6 (marginal)
     "KBOS": (3.0, -2.5),
-    "KMDW": (2.5, -2.0),
+    "KMDW": (2.0, -1.5),   # deep regen 2026-05-22: n=30 50% -2.5 (marginal)
     "KMIA": (2.5, -2.0),
     "KNYC": (3.5, -3.0),
     "KPHL": (2.5, -2.0),
