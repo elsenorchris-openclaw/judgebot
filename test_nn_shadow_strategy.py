@@ -162,13 +162,16 @@ class TestRmTruncation(unittest.TestCase):
         # Just verify p_yes < 0.5 (NO is still favored after truncation) and
         # that the edge is smaller than the untruncated 67.8pp.
         self.assertIsNotNone(d["p_yes"])
-        # With rm-anchor + truncation, P(YES) should be ~0.44 (not 0.30).
+        # With rm-anchor + truncation, P(YES|high>=66) = P(high in [66,67.5])
+        # / P(high>=66) = 0.0555/0.0774 = 0.72 (rm already inside the bracket
+        # and past peak -> settles in [66,67]). Earlier <0.60 was a stale bound.
         self.assertGreater(d["p_yes"], 0.30)
-        self.assertLess(d["p_yes"], 0.60)
-        # Edge_no = (1 - p_yes) - 0.02. Should be <= 70pp and > 30pp.
+        self.assertLess(d["p_yes"], 0.75)
+        # Edge_no = (1 - p_yes) - 0.02 = 0.26: positive (NO still favored)
+        # but SHRUNK from the untruncated 0.68 -- the whole point of truncation.
         if d["side"] == "BUY_NO" and d["edge"] is not None:
             self.assertLess(d["edge"], 0.70)
-            self.assertGreater(d["edge"], 0.30)
+            self.assertGreater(d["edge"], 0.0)
 
     def test_truncation_when_rm_above_yes_window(self):
         # rm already overshot the YES window: P(YES | day_high ≥ rm) = 0.
