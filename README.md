@@ -2,7 +2,44 @@
 
 A judgment-first Kalshi trading bot for daily weather markets. Claude is the
 entry+exit decision-maker; deterministic guardrails wrap the LLM so the
-worst-case blast radius is bounded by code, not by prompt quality.
+worst-case blast radius is bounded by code, ## Per-station HIGH push windows (v1) + faithful WR accumulator — 2026-05-22 05:45 UTC
+
+HIGH decision windows are now **per-station** for 8 cells, replacing the single
+global deep-pre-peak window for those stations. `PUSH_HIGH_TEMP_WINDOW_BY_STATION`
+(config.py) is looked up first in `nn_shadow_worker._in_decision_window` (gated
+behind the global `PUSH_HIGH_TEMP_WINDOW` being set); a station absent from the
+dict falls back to the global `(3.0,-2.0)` default.
+
+| station | (before, after) | buys at |
+|---|---|---|
+| KATL | (2.0, -1.5) | peak-2.0 |
+| KAUS | (1.5, -1.0) | peak-1.5 |
+| KBOS | (3.0, -2.5) | peak-3.0 |
+| KMDW | (2.5, -2.0) | peak-2.5 |
+| KMIA | (2.5, -2.0) | peak-2.5 |
+| KNYC | (3.5, -3.0) | peak-3.5 |
+| KPHL | (2.5, -2.0) | peak-2.5 |
+| KPHX | (3.0, -2.5) | peak-3.0 |
+
+**Why.** A price-gated mu-replay backtest (`tools/push_window_backtest.py`)
+reproduces the faithful per-cell WR once the bot's asymmetric price gate is
+applied (pre-peak HIGH 62% vs faithful 58%; the earlier "~20pp understatement"
+was the MISSING price gate, NOT a mu error). The per-band WR table
+(`tools/per_cell_table.py`) showed (a) at-peak entries lose at every station
+(validates the h2pk>=0.5 gate) and (b) per-station sweet spots. **AUS is the key
+change**: it LOSES deep pre-peak (29% WR) and only wins near peak, so the global
+deep window sat in its dead zone.
+
+**v1 / thin data.** Windows are from May-2026 candle depth only (n~8-11/band) --
+to be regenerated from the deep historical backfill (`candle-hist-backfill.service`,
+pulling prior-year May). 30-min windows may reduce fill count vs the prior 60-min;
+watch and widen if positions drop. **Reversible:** set
+`PUSH_HIGH_TEMP_WINDOW_BY_STATION = {}` to revert all HIGH to the global.
+
+**Faithful WR accumulator** (`tools/accumulate_cell_wr.py` + `accumulate-cell-wr.timer`,
+daily 12:00 UTC): records every real executed trade + Kalshi settlement to
+`~/data/faithful_cell_wr.jsonl` -- gold-standard per-cell WR, no replay. Seeded
+184 trades; corroborates HIGH pre-peak 56% vs at-peak 31%.
 
 ## LOW cold-front gate — 2026-05-21 21:28 UTC
 
