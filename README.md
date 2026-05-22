@@ -4,6 +4,21 @@ A judgment-first Kalshi trading bot for daily weather markets. Claude is the
 entry+exit decision-maker; deterministic guardrails wrap the LLM so the
 worst-case blast radius is bounded by code, not by prompt quality.
 
+## NYC/MIA BUY_NO sized to $30 — 2026-05-22
+
+`PUSH_HIGH_NO_BET_BY_STATION = {"KNYC": 30, "KMIA": 30}`. NYC and MIA BUY_NO are
+the only HIGH cells with a robust *out-of-sample* edge (cross-year backtest; every
+other cell/side/filter — and the NWP forecast-dispersion good-day predictor — came
+up negative or pure noise). So the proven NO bets size up to $30; the YES side and
+all other cells keep their `PUSH_HIGH_MAX_BET_BY_STATION` cap ($5 NYC/MIA, $3
+default). Applied in `nn_shadow_worker` *after* `pure_nn_decide` (so it is BUY_NO-
+and station-specific), mirroring `_compute_size` and reusing the existing-cost +
+MAE-conf-mult logic. The guardrail `max_bet_high_series_usd` backstop was raised
+5 -> 30 so the larger NO bet is not rejected downstream — the per-station/side
+worker caps remain the real limiter; this is only the backstop. MAE confidence
+sizing still applies, so a less-accurate cell-day sizes below $30. Reversible:
+empty the dict.
+
 ## HIGH default window -> [peak-1.5, peak-1.0] — 2026-05-22
 
 `PUSH_HIGH_TEMP_WINDOW` (3.0,-2.0) -> (1.5,-1.0): the global HIGH default (used by

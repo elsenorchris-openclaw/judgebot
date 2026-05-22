@@ -1402,6 +1402,32 @@ def _evaluate_ticker(ticker: str, trigger: str) -> None:
             series_cap_low_usd=float(_gr.get("max_bet_low_series_usd", 5.0)),
         )
 
+        # 2026-05-22 (Chris): scale the proven NYC/MIA BUY_NO edge up to its
+        # per-station cap (PUSH_HIGH_NO_BET_BY_STATION) — the only OOS-robust HIGH
+        # edge. Only ever INCREASES a BUY_NO on a listed station; the YES side and
+        # every other cell keep their PUSH_HIGH_MAX_BET_BY_STATION cap. Mirrors
+        # _compute_size (qty = budget // price) and reuses the existing-cost +
+        # MAE-conf-mult logic from the base sizing above.
+        if _is_high_sizing and decision.get("decision") == "BUY_NO":
+            _no_cap = float(getattr(_cfg, "PUSH_HIGH_NO_BET_BY_STATION", {}).get(cand.station, 0.0))
+            _price_c = decision.get("price_c")
+            if _no_cap > _high_cap and _price_c:
+                _price_usd = float(_price_c) / 100.0
+                _rem_big = _no_cap
+                if _rt is not None:
+                    try:
+                        _pos = _rt.positions.get(ticker) if hasattr(_rt, "positions") else None
+                        if _pos:
+                            _rem_big = max(0.0, _no_cap - float(_pos.get("cost", 0)))
+                    except Exception:
+                        pass
+                _rem_big *= _conf_mult
+                _new_qty = int(min(_no_cap, _rem_big) // _price_usd) if _price_usd > 0 else 0
+                if _new_qty > (decision.get("qty") or 0):
+                    decision["qty"] = _new_qty
+                    decision["size_usd"] = round(_new_qty * _price_usd, 2)
+                    pkt["no_bet_scaled_usd"] = _no_cap
+
         if decision["decision"] in ("BUY_YES", "BUY_NO"):
             _bump("evals_buy_decisions")
         else:

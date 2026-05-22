@@ -380,7 +380,7 @@ GUARDRAILS = {
     # 2026-05-20: raised 5 -> 15 (Chris directive). HIGH is the profitable book
     # (+$40 on 5/20 vs LOW -$24); lean bet size into it. pure_nn_decide sizing
     # reads this same value via the worker so qty is sized to match the cap.
-    "max_bet_high_series_usd": 5.0,  # 2026-05-22 lowered 15->5 per Chris (all judge positions <=$5)
+    "max_bet_high_series_usd": 30.0,  # 2026-05-22: backstop ceiling 5->30 so NYC/MIA BUY_NO can size to $30 (PUSH_HIGH_NO_BET_BY_STATION). Other cells stay <=$5 via the per-station/side worker caps; this is only the guardrail backstop, not base sizing.
     # 2026-05-16 (evening): LOW-series brackets (KXLOW-*) capped at $5 alongside
     # HIGH while validating the nn_match k-NN heating-curve projector as the
     # primary μ source. Symmetric to max_bet_high_series_usd; applied at
@@ -493,6 +493,7 @@ AUTO_EXECUTE_BUY_YES_PUSH: bool = True
 AUTO_EXEC_LOW_ENABLED: bool = False   # 2026-05-22 PAUSED per Chris -- LOW over-trades pre-dawn into illiquid books (phantom MTM). Set True to resume.
 PUSH_HIGH_MAX_BET_DEFAULT: float = 3.0       # 2026-05-22 per Chris: $3 HIGH cap for all cells...
 PUSH_HIGH_MAX_BET_BY_STATION = {"KNYC": 5.0, "KMIA": 5.0}  # ...except NYC/MIA (cross-validated edge cells) keep $5
+PUSH_HIGH_NO_BET_BY_STATION = {"KNYC": 30.0, "KMIA": 30.0}  # 2026-05-22 (Chris): the one OOS-robust HIGH edge (NYC/MIA BUY_NO) sizes up to $30; applied after the decision in nn_shadow_worker for BUY_NO only — YES side + all other cells keep PUSH_HIGH_MAX_BET_BY_STATION.
 
 # 2026-05-21: the push decision window comes SOLELY from the per-(station,
 # series, month) window table in push_window_overrides.PUSH_WINDOW_OVERRIDES.
