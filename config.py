@@ -526,9 +526,22 @@ PUSH_PEAK_FRACTIONAL_PATH: str = "/home/ubuntu/data/peak_fractional_5yr_10day.js
 # +$65.51. So cap how EARLY these cells open, leaving `after`, peak time, the
 # wide-but-INACCURATE cells (MAE-sizing already shrinks those), and all LOW
 # windows untouched. Applied in _in_decision_window. Set ENABLED=False to revert.
-PUSH_EARLY_TRIM_HIGH_ENABLED: bool = True
+PUSH_EARLY_TRIM_HIGH_ENABLED: bool = False  # 2026-05-21 OFF: the temp deep-pre-peak
+# window (PUSH_HIGH_TEMP_WINDOW, below) needs before=3.0 which the trim would cap;
+# the 67-day backtest showed the un-trimmed early zone is where the PnL is. Re-enable
+# with True if reverting PUSH_HIGH_TEMP_WINDOW to None.
 PUSH_EARLY_TRIM_BEFORE_CAP: float = 1.0   # HIGH cell opens no earlier than peak-1.0h
 PUSH_EARLY_TRIM_MAE_MAX: float = 1.6      # only "accurate" cells (full-size tier); inaccurate wide cells left to MAE-sizing
+
+# 2026-05-21 TEMP deep-pre-peak HIGH window from the 67-day candlestick-price
+# backtest sweep (look-ahead-free, settled 3/15-5/20): h2pk 2-3h before peak was
+# the max, +1329c / 31% win / +3.2 per trade, positive on 9/12 stations, vs the
+# current at-peak windows' -416c. Mechanism: market softest when the high is
+# hours away, where the matcher's analog projection has the most edge. Needs the
+# early-trim OFF (below) since before=3.0 would otherwise be capped. Reversible:
+# set to None (and re-enable trim) to revert. Superseded by the per-(station,
+# month) regen once the full multi-year backfill lands. HIGHER VARIANCE (31% win).
+PUSH_HIGH_TEMP_WINDOW = (3.0, -2.0)   # (before, after) hours vs peak; None = off
 
 # 2026-05-21: per-cell MEDIAN bias correction (HIGH only) + MAE-based confidence
 # sizing. Both consume push_window_overrides 4-tuples (before, after, bias, mae)

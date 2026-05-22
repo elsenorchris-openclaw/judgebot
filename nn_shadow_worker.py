@@ -688,6 +688,14 @@ def _in_decision_window(station: str, series: str, local_hour: float,
         return False, f"no_window_defined:{station}/{series}/m{month}"
 
     before, after = float(win[0]), float(win[1])
+    # 2026-05-21 TEMP: pre-peak HIGH window from the 67-day price backtest (P1).
+    # Beats the current at-peak windows (+559c vs -416c on settled 3/15-5/20).
+    # Applied before early-trim; (1.5,-1.0) is trim-compatible so it survives.
+    # Reversible via config.PUSH_HIGH_TEMP_WINDOW=None. Superseded by per-(station,
+    # month) regen once the full historical backfill lands.
+    _temp_win = getattr(_cfg, "PUSH_HIGH_TEMP_WINDOW", None)
+    if series == "HIGH" and _temp_win:
+        before, after = float(_temp_win[0]), float(_temp_win[1])
     # 2026-05-21: early-side trim for HIGH accurate-but-wide cells. The window
     # table is built on MAE (mu accuracy), but accuracy != PnL: in the ~40 HIGH
     # cells that are accurate (mae < MAE_MAX) yet open >1h before peak, the

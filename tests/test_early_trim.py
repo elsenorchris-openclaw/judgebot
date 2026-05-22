@@ -27,6 +27,7 @@ class TestEarlyTrim(unittest.TestCase):
              mock.patch.object(cfg, "PUSH_EARLY_TRIM_HIGH_ENABLED", enabled), \
              mock.patch.object(cfg, "PUSH_EARLY_TRIM_BEFORE_CAP", cap), \
              mock.patch.object(cfg, "PUSH_EARLY_TRIM_MAE_MAX", mmax), \
+             mock.patch.object(cfg, "PUSH_HIGH_TEMP_WINDOW", None), \
              mock.patch.object(cfg, "USE_PUSH_WINDOW_OVERRIDES", True):
             return nsw._in_decision_window(station, series, local_hour, "2026-05-21")
 

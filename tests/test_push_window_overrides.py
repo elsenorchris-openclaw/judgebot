@@ -27,9 +27,15 @@ class TestPushWindowOverrides(unittest.TestCase):
         # peak_fractional_5yr_10day.json ≈ 15.883 for May 19.
         self._orig_lookup = nsw._lookup_peak_hour
         nsw._lookup_peak_hour = lambda station, series, climate_day: 15.883
+        # disable the temp HIGH window override so these tests exercise the
+        # underlying override-table logic (2026-05-21 PUSH_HIGH_TEMP_WINDOW ship)
+        import config as _c
+        self._tw = mock.patch.object(_c, "PUSH_HIGH_TEMP_WINDOW", None)
+        self._tw.start()
 
     def tearDown(self):
         nsw._lookup_peak_hour = self._orig_lookup
+        self._tw.stop()
 
     def test_override_applied_when_flag_on_and_cell_present(self):
         """KATL HIGH May has override; window should center near peak."""
