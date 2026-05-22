@@ -1,0 +1,9 @@
+[Unit]
+Description=Faithful per-cell WR accumulator (paper_judge_bot)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+ExecStart=/usr/bin/python3 /home/ubuntu/paper_judge_bot/tools/accumulate_cell_wr.py

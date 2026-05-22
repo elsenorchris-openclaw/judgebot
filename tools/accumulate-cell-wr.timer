@@ -1,0 +1,9 @@
+[Unit]
+Description=Run faithful per-cell WR accumulator daily (after settlement)
+
+[Timer]
+OnCalendar=*-*-* 12:00:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target
