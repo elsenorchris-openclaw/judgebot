@@ -380,7 +380,7 @@ GUARDRAILS = {
     # 2026-05-20: raised 5 -> 15 (Chris directive). HIGH is the profitable book
     # (+$40 on 5/20 vs LOW -$24); lean bet size into it. pure_nn_decide sizing
     # reads this same value via the worker so qty is sized to match the cap.
-    "max_bet_high_series_usd": 30.0,  # 2026-05-22: backstop ceiling 5->30 so NYC/MIA BUY_NO can size to $30 (PUSH_HIGH_NO_BET_BY_STATION). Other cells stay <=$5 via the per-station/side worker caps; this is only the guardrail backstop, not base sizing.
+    "max_bet_high_series_usd": 15.0,  # 2026-05-22 (Chris): uniform $15 max per HIGH position, all stations. Clamps both HIGH sides to $15 (NO min(30,15), YES min(15,15)).
     # 2026-05-16 (evening): LOW-series brackets (KXLOW-*) capped at $5 alongside
     # HIGH while validating the nn_match k-NN heating-curve projector as the
     # primary μ source. Symmetric to max_bet_high_series_usd; applied at
@@ -491,9 +491,9 @@ SHADOW_NN_EVENT_DRIVEN: bool = True
 AUTO_EXECUTE_BUY_NO_PUSH: bool = True
 AUTO_EXECUTE_BUY_YES_PUSH: bool = True
 AUTO_EXEC_LOW_ENABLED: bool = False   # 2026-05-22 PAUSED per Chris -- LOW over-trades pre-dawn into illiquid books (phantom MTM). Set True to resume.
-PUSH_HIGH_MAX_BET_DEFAULT: float = 3.0       # 2026-05-22 per Chris: $3 HIGH cap for all cells...
-PUSH_HIGH_MAX_BET_BY_STATION = {"KNYC": 5.0, "KMIA": 5.0}  # ...except NYC/MIA (cross-validated edge cells) keep $5
-PUSH_HIGH_NO_BET_BY_STATION = {"KMIA": 30.0}  # 2026-05-22 (Chris): MIA BUY_NO (robust both eras) sizes up to $30. NYC DROPPED — live-era NYC NO is only ~breakeven (+2.8 on its own window), so it trades at base $5. Applied after the decision in nn_shadow_worker for BUY_NO only.
+PUSH_HIGH_MAX_BET_DEFAULT: float = 15.0      # 2026-05-22 (Chris): $15 HIGH cap for ALL stations (uniform).
+PUSH_HIGH_MAX_BET_BY_STATION = {}  # 2026-05-22 (Chris): no per-station differentiation — all HIGH stations use the $15 default. Re-add a cell to override.
+PUSH_HIGH_NO_BET_BY_STATION = {}  # 2026-05-22 (Chris): removed the $30 MIA-NO carve-out — uniform $15 max for all HIGH now (PUSH_HIGH_MAX_BET_DEFAULT). NO-resize code in nn_shadow_worker stays but is dormant while empty; re-add {station: usd} to size a NO cell up.
 
 # 2026-05-21: the push decision window comes SOLELY from the per-(station,
 # series, month) window table in push_window_overrides.PUSH_WINDOW_OVERRIDES.

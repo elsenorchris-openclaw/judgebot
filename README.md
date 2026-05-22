@@ -4,6 +4,17 @@ A judgment-first Kalshi trading bot for daily weather markets. Claude is the
 entry+exit decision-maker; deterministic guardrails wrap the LLM so the
 worst-case blast radius is bounded by code, not by prompt quality.
 
+## Uniform $15 HIGH max bet (all stations) — 2026-05-22
+
+Per Chris: every HIGH position caps at **$15**, all stations — replacing the
+$3 default / $5 NYC-MIA / $30 MIA-NO sizing. `PUSH_HIGH_MAX_BET_DEFAULT=15.0`,
+`PUSH_HIGH_MAX_BET_BY_STATION={}`, `PUSH_HIGH_NO_BET_BY_STATION={}` (the
+after-decision NO-resize code stays but is dormant while the dict is empty), and
+the guardrail `max_bet_high_series_usd=15.0` backstop clamps both HIGH sides to
+$15 (NO min(30,15), YES min(15,15)). The per-station window TIMING
+(`PUSH_HIGH_TEMP_WINDOW_BY_STATION`) is unchanged — this is bet SIZE only. LOW
+sizing unchanged.
+
 ## Live-era per-station HIGH BUY_NO windows + NYC dropped from $30 — 2026-05-22
 
 Replaced the per-station HIGH temp windows with a LIVE-era (2026-03-15+, all 19
