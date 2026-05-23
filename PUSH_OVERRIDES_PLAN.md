@@ -21,6 +21,8 @@ local copies are stale (CLAUDE.md RULE #0.7).
 | **MAE-based confidence sizing (cell-level)** | ✅ SHIPPED `USE_PUSH_MAE_SIZING` |
 | **GLOBAL regime-MAE adjustment (anomaly/sigma/sky/wind/tspeak)** | ✅ SHIPPED 2026-05-21 `USE_PUSH_REGIME_MAE_ADJ` — sizing-only. **Per-side (HIGH/LOW) deltas @ `PUSH_REGIME_MAE_DAMP=1.0`** (HIGH/LOW respond oppositely; hot-anomaly HIGH −0.25 / LOW +1.46). corr 0.167→0.229(pooled)→0.250(per-side). Deltas in `data/regime_mae_deltas.json` (gitignored, per-side `{high|low:{dim:{bucket}}}`). |
 | **HIGH early-side window trim (accurate-but-wide cells)** | ✅ SHIPPED 2026-05-21 `PUSH_EARLY_TRIM_HIGH_ENABLED` — caps `before`→1.0 on the 40 HIGH cells with mae<1.6 AND before>1.0. Windows are MAE-built but accuracy≠PnL: early offsets mis-call the bracket. **2024-2025 holdout (n=12,548): offset<-1.25 → wrong bracket 60% / ≥2F miss 32% vs 46%/16% near peak; 38/40 cells worse early.** Live PnL (n=52) agreed (+$18.58→+$65.51). `after`/peak/inaccurate-wide/LOW untouched. Applied in `_in_decision_window`, not the table → survives regen. |
+| **Empirical tail-loss correction (T brackets)** | ✅ SHIPPED 2026-05-23 `103270a` `USE_TAIL_EMPIRICAL_PYES=True`. Raises P(YES) of the fat-surprise tail (HIGH hot / LOW cold) on open-ended T brackets to the empirical floor (`_emp_tail_p` in `nn_shadow_strategy.py`); deflates overconfident deep-margin tail BUY_NO below the 12pp gate. Interior B untouched. See §12. |
+| MIA-class interior over-projection fixes | ⛔ ALL REJECTED 2026-05-22/23 — see §12. Forecast-divergence clamp, boundary-fragility/σ haircut, global two-piece σ-recal. MIA 5/21 is irreducible variance. |
 | MEAN-bias application | ⛔ REJECTED (−8.6% holdout — never ship) |
 | Per-cell regime slicing (MAE) | ⛔ REJECTED — no better than cell-level (noise) |
 | Low-confidence (37-cell) gating | ⛔ REJECTED — flag is noise (clean fwd test: flagged did BETTER) |
@@ -322,3 +324,45 @@ Backups on VPS: `push_window_overrides.py.pre_fullcoverage_20260521`,
   if `predict()`'s μ changes; pure re-bucketing (e.g. new thresholds) can use the
   `phq_raw_*.csv.gz` sidecars without re-running predict.
 - Regenerating reads per-station CSVs — keep `~/data/per_hour_quality_offset_cond/`.
+
+---
+
+## 12. MIA 5/21 loss investigation + σ-tail calibration (2026-05-22/23)
+
+Triggered by the MIA `KXHIGHMIA-26MAY21-B89.5` BUY_NO loss (μ=91.8 vs actual ~89).
+Three "prevention" hypotheses were built + backtested and **all REJECTED**; one
+adjacent real leak was found and SHIPPED. **Do not relitigate the rejected ones.**
+
+**Verdict on MIA itself: irreducible variance.** It was an interior B-bracket,
+a +EV bet (P(NO)=0.79 @ 45¢) that lost its tail. Calibration shows interior
+brackets are well-calibrated (HIGH 0.046 model vs 0.042 real). No signal
+separates it from winners; gating it = refusing +EV bets.
+
+Rejected fixes (data: `phq_ext/phq_raw_*.csv.gz` sidecars — matcher μ/σ/actual,
+**Nov-2024→May-2026 only, no summer**; forecasts from `bot_decisions.sqlite`,
+`analog_mu` there is always NULL):
+1. **Forecast-divergence clamp** (cap μ at NWP consensus+buffer). REJECTED: the
+   matcher *beats* forecast (MAE 1.13 vs 1.83); large matcher>forecast divergence
+   usually means the matcher is RIGHT (e.g. OKC 5/19 same +7.4 div, dead-on).
+   Clamp hurts>helps at every buffer.
+2. **Boundary-fragility / σ haircut.** REJECTED: HIGH over-projection tail
+   (MIA's direction) is *thin* (0.72–0.85× Gaussian at 1–1.5σ).
+3. **Global two-piece-normal σ recal.** REJECTED: worsened interior-B Brier;
+   the earlier "edges overstated 5–7pp" was a measurement error (conflated tail
+   probability with bracket-occupancy — a cold snap that blows *past* an interior
+   bracket WINS the BUY_NO).
+
+**SHIPPED — empirical tail-loss correction (T brackets only).** The conflation
+above pointed to the correct, narrower target: open-ended **T** brackets, where
+the loss IS the whole fat tail. There the matcher's Gaussian P(YES) genuinely
+under-states it. Confirmed on the live rm-conditioned `_p_yes_constrained` path
+(conditioning barely helps, ×1.04 HIGH / ×1.09 LOW): realized loss vs model —
+**1.5σ 1.2×(H)/1.7×(L), 2σ 2.0×/3.7×, 2.5σ 4.8×/9.8×**; cross-station stable
+(grpA≈grpB). Fix in `nn_shadow_strategy.pure_nn_decide`: for fat-direction T
+(HIGH T-warm / LOW T-cold) raise P(YES) to `_emp_tail_p(is_high, m)` via `max()`
+(never lowers; capped at the 2.5σ empirical value). Footprint: ~14% of BUY
+decisions are T; ~5% fat-direction; replay blocks ~13/day overconfident tail
+BUY_NO, edge deflation ~5–7pp. Flag `USE_TAIL_EMPIRICAL_PYES`; revert = False +
+restart. **Caveat:** validated vs *actual* (not directly vs market — settled
+pure-nn n too small); rests on the v1 "market is well-calibrated" verdict that
+overconfident edges are false edges. No summer data.
