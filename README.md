@@ -4,6 +4,12 @@ A judgment-first Kalshi trading bot for daily weather markets. Claude is the
 entry+exit decision-maker; deterministic guardrails wrap the LLM so the
 worst-case blast radius is bounded by code, not by prompt quality.
 
+## HIGH sizing tiers ($15 robust / $3 soft) + daily window-replay cron — 2026-05-23
+
+(1) HIGH max bet tiered by window validation: **$15** for the 15 ROBUST 30-min cells (PUSH_HIGH_MAX_BET_BY_STATION), **$3** for SOFT/NEG/default cells (MSP/MSY/SFO/SAT/DCA) via PUSH_HIGH_MAX_BET_DEFAULT; guardrail backstop $15. MAE conf-sizing still scales below the cap.
+
+(2) Daily systemd timer **window-replay.timer** (13:00 UTC) runs tools/daily_window_replay.sh -> replays the CURRENT windows on the prior day live-recorder data (shadow log) + live Kalshi settlement (tools/replay_windows.py), appending to data/window_replay_log.txt = a forward track record. 2026-05-22: 6W/3L +$1.04 (+11.6c/bet); biggest loss SAT (the NEG cell). Units live in /etc/systemd/system/window-replay.{service,timer}.
+
 ## LOW $1-probe min-buy floor fix — 2026-05-23
 
 The $1 LOW probe never placed an order: execute_buy used the global $1 min_buy_usd floor as the scout floor_cost, so a 1-contract LOW buy (~$0.60-0.80) at the $1 cap was rejected ("reachable $0.60 < floor $1.00"). The bot CROSSES (+1c over ask), so it was not a fill/posting issue -- the order was skipped pre-placement. Fix: execute_buy now uses PUSH_MIN_BUY_USD_LOW ($0.40) as the floor for KXLOW* tickers. LOW can now place 1-contract orders. (Coverage is still sparse -- ~78% of LOW evals get no matcher projection -- so LOW trades infrequently.)
