@@ -4,6 +4,17 @@ A judgment-first Kalshi trading bot for daily weather markets. Claude is the
 entry+exit decision-maker; deterministic guardrails wrap the LLM so the
 worst-case blast radius is bounded by code, not by prompt quality.
 
+## Shadow log records mu + gate-aware daily replay — 2026-05-23
+
+The shadow log now records **mu_chosen** (raw matcher mu) per evaluation, so the daily
+window replay (tools/replay_windows.py) can apply the **(2d) thin-margin B-bracket gate**
+(which needs mu). The replay now reports **NO-GATE vs WITH-GATE** (the live bot) so the
+gate's daily contribution is visible. NOTE: 2026-05-22 could NOT be gate-tested -- no mu
+source existed for it (recorder did not log mu; phq_ext ends 05-20). Full gate-aware
+replays begin ~2026-05-24 (once a full day of mu-logged entries exists). The gate's value
+(+7.6c/bet, both OOS halves) was validated by the prior session on the full live era; it
+only SKIPS a bet (never flips a side).
+
 ## HIGH sizing tiers ($15 robust / $3 soft) + daily window-replay cron — 2026-05-23
 
 (1) HIGH max bet tiered by window validation: **$15** for the 15 ROBUST 30-min cells (PUSH_HIGH_MAX_BET_BY_STATION), **$3** for SOFT/NEG/default cells (MSP/MSY/SFO/SAT/DCA) via PUSH_HIGH_MAX_BET_DEFAULT; guardrail backstop $15. MAE conf-sizing still scales below the cap.

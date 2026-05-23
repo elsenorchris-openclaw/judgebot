@@ -1513,6 +1513,7 @@ def _evaluate_ticker(ticker: str, trigger: str) -> None:
             # median-bias; mae_conf_mult = MAE-based bet-size multiplier.
             "push_override": pkt.get("push_override"),
             "mu_pre_bias": pkt.get("mu_pre_bias"),
+            "mu_chosen": pkt.get("mu_chosen"),   # 2026-05-23: raw matcher μ — recorded so the daily window replay can apply the (2d) thin-margin gate (needs μ).
             "bias_applied": pkt.get("bias_applied"),
             "mae_conf_mult": pkt.get("mae_conf_mult"),
             "mae_adjusted": pkt.get("mae_adjusted"),
