@@ -380,7 +380,7 @@ GUARDRAILS = {
     # 2026-05-20: raised 5 -> 15 (Chris directive). HIGH is the profitable book
     # (+$40 on 5/20 vs LOW -$24); lean bet size into it. pure_nn_decide sizing
     # reads this same value via the worker so qty is sized to match the cap.
-    "max_bet_high_series_usd": 5.0,  # 2026-05-23 (Chris): uniform $5 max per HIGH position, all stations (lowered from $15). Clamps both HIGH sides to $5.
+    "max_bet_high_series_usd": 15.0,  # 2026-05-23 (Chris): backstop $15 so ROBUST cells size to $15. Per-station via PUSH_HIGH_MAX_BET_BY_STATION ($15 robust) else PUSH_HIGH_MAX_BET_DEFAULT ($3).
     # 2026-05-16 (evening): LOW-series brackets (KXLOW-*) capped at $5 alongside
     # HIGH while validating the nn_match k-NN heating-curve projector as the
     # primary μ source. Symmetric to max_bet_high_series_usd; applied at
@@ -491,8 +491,15 @@ SHADOW_NN_EVENT_DRIVEN: bool = True
 AUTO_EXECUTE_BUY_NO_PUSH: bool = True
 AUTO_EXECUTE_BUY_YES_PUSH: bool = True
 AUTO_EXEC_LOW_ENABLED: bool = True    # 2026-05-23 (Chris): ON as a $1 live probe (max_bet_low_series_usd=1, deep-pre-min window). Backtest: LOW BUY_NO loses crossing the wide spread; probe tests if live execution differs. Set False to re-pause.
-PUSH_HIGH_MAX_BET_DEFAULT: float = 5.0       # 2026-05-23 (Chris): $5 HIGH cap for ALL stations (uniform; lowered from $15).
-PUSH_HIGH_MAX_BET_BY_STATION = {}  # 2026-05-22 (Chris): no per-station differentiation — all HIGH stations use the $15 default. Re-add a cell to override.
+PUSH_HIGH_MAX_BET_DEFAULT: float = 3.0       # 2026-05-23 (Chris): $3 cap for SOFT/NEG/default HIGH cells (MSP/MSY/SFO/SAT/DCA). The 15 ROBUST cells get $15 via PUSH_HIGH_MAX_BET_BY_STATION.
+PUSH_HIGH_MAX_BET_BY_STATION = {
+    # 2026-05-23 (Chris): $15 for the 15 ROBUST 30-min windows (validated +PnL
+    # both date-halves). SOFT/NEG/default cells (MSP, MSY, SFO, SAT, DCA) are
+    # NOT listed -> they fall to PUSH_HIGH_MAX_BET_DEFAULT ($3).
+    "KATL": 15.0, "KAUS": 15.0, "KBOS": 15.0, "KDEN": 15.0, "KDFW": 15.0,
+    "KHOU": 15.0, "KLAS": 15.0, "KLAX": 15.0, "KMDW": 15.0, "KMIA": 15.0,
+    "KNYC": 15.0, "KOKC": 15.0, "KPHL": 15.0, "KPHX": 15.0, "KSEA": 15.0,
+}
 PUSH_HIGH_NO_BET_BY_STATION = {}  # 2026-05-22 (Chris): removed the $30 MIA-NO carve-out — uniform $15 max for all HIGH now (PUSH_HIGH_MAX_BET_DEFAULT). NO-resize code in nn_shadow_worker stays but is dormant while empty; re-add {station: usd} to size a NO cell up.
 
 # 2026-05-21: the push decision window comes SOLELY from the per-(station,
@@ -710,6 +717,32 @@ PUSH_MAX_ENTRY_C: int = 80
 PUSH_MIN_VSBY_MI: float = 0.5              # visibility < 0.5 mi (dense fog / heavy precip) → skip
 PUSH_MAX_WIND_MPH: float = 40.0            # sustained wind or gust > 40 mph (~35 kt) → skip
 PUSH_MAX_SPREAD_C_HIGH: float = 15.0       # 2026-05-23: skip HIGH push BUY when (yes_ask - yes_bid) > 15c. Crossing a wide spread pays away the edge; backtest HIGH spread>15c = -21..-31c/bet vs +1.9c filtered (both halves OOS). LOW NOT filtered (it is a $1 probe). 0 = off.
+
+# 2026-05-23: HIGH B-bracket BUY_NO thin-margin gate. Skip a BUY_NO on a 2-sided
+# (B) bracket when the CLI-adjusted forecast (mu - per-station obs->CLI offset)
+# lands INSIDE the bracket [floor-0.5, cap+0.5] -- i.e. the bot would short a
+# bracket its OWN forecast points into. Faithful gated buy-at-open replay (live
+# era 2026-03-15..05-19, production windows): these win 32% / -3.9c/bet, the
+# effect is edge-INDEPENDENT (still -8.6c holding model edge fixed in [12,20]pp)
+# and negative in BOTH date-halves. Gating lifts the kept HIGH push book
+# +4.1->+7.6c/bet, +$7.9 INCREMENTAL over the shipped (2t) tail-bet gate (which
+# only catches the rare p_yes>0.5 case), both OOS halves +. This is the
+# THIN-boundary complement of USE_TAIL_EMPIRICAL_PYES (the deep-SAFE T-tail
+# correction). HIGH only -- LOW flips sign (and is a $1 probe). Offset = the net
+# mu->CLI bias (our obs runs ~+0.5F hot vs CLI; the matcher undershoots obs
+# ~0.2F, partly cancelling) = per-station median(mu - yes_bracket_center) over
+# the live era; stations absent here (e.g. KDCA, stale projections) use DEFAULT.
+# Distinct from the REVERTED p_yes median-bias correction: this only SKIPS a bet
+# (never shifts p_yes / flips a side), so it cannot turn a winner into a loser.
+# Set PUSH_SKIP_NO_MU_NEAR_BRACKET=False to revert.
+PUSH_SKIP_NO_MU_NEAR_BRACKET: bool = True
+PUSH_NO_MU_CLI_OFFSET_DEFAULT: float = 0.5
+PUSH_NO_MU_CLI_OFFSET_BY_STATION: dict = {
+    "KATL": 0.1, "KAUS": 0.3, "KBOS": 0.9, "KDEN": 0.3, "KDFW": 0.0,
+    "KHOU": 0.7, "KLAS": 0.6, "KLAX": -0.1, "KMDW": 0.2, "KMIA": 0.9,
+    "KMSP": 0.8, "KMSY": 0.6, "KNYC": 0.4, "KOKC": 0.5, "KPHL": 0.4,
+    "KPHX": 0.5, "KSAT": -0.3, "KSEA": 0.3, "KSFO": 0.4,
+}
 
 # 2026-05-21: LOW cold-front gate ("Tier 1.5"). Distinct from PUSH_MAX_WIND_MPH
 # above (40 mph, both sides, catastrophic). Sustained wind ≥ ~15 kt at an

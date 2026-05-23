@@ -865,6 +865,25 @@ def _try_auto_execute(cand, packet: dict, decision: dict,
             min_h2pk = float(min_h2pk_raw)
             if h2pk < min_h2pk:
                 return False, f"h2pk_too_low {h2pk:.2f}<{min_h2pk}"
+    # (2d) HIGH-only thin-margin BUY_NO gate. Skip a B-bracket BUY_NO when the
+    # CLI-adjusted forecast (mu - per-station obs->CLI offset) lands INSIDE the
+    # bracket [floor-0.5, cap+0.5] -- shorting a bracket our own mu points into.
+    # Live-era replay: 32% WR / -3.9c, edge-independent, both date-halves; gating
+    # lifts the HIGH push book +7.6c/bet (+$7.9 over the shipped (2t) gate), both
+    # OOS halves +. Complement of USE_TAIL_EMPIRICAL_PYES (deep T-tail). Only
+    # SKIPS (never shifts p_yes) -> distinct from the reverted bias correction.
+    if series == "HIGH" and direction == "BUY_NO" and getattr(
+            _cfg, "PUSH_SKIP_NO_MU_NEAR_BRACKET", False):
+        _fl = packet.get("floor"); _cp = packet.get("cap"); _mu = packet.get("mu_chosen")
+        if _fl is not None and _cp is not None and _mu is not None:
+            try:
+                _off = float(getattr(_cfg, "PUSH_NO_MU_CLI_OFFSET_BY_STATION", {}).get(
+                    cand.station, getattr(_cfg, "PUSH_NO_MU_CLI_OFFSET_DEFAULT", 0.5)))
+                if (float(_fl) - 0.5) <= (float(_mu) - _off) <= (float(_cp) + 0.5):
+                    return False, (f"thin_margin_no mu={float(_mu):.1f}-off{_off:+.1f} "
+                                   f"in[{float(_fl)-0.5:.1f},{float(_cp)+0.5:.1f}]")
+            except (TypeError, ValueError):
+                pass
     if _rt is None:
         return False, "rt_not_initialized"
     # (2b) Tier 1 runtime gates — physics-catastrophic regimes the matcher

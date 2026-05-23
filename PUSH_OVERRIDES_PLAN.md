@@ -366,3 +366,41 @@ BUY_NO, edge deflation ~5–7pp. Flag `USE_TAIL_EMPIRICAL_PYES`; revert = False 
 restart. **Caveat:** validated vs *actual* (not directly vs market — settled
 pure-nn n too small); rests on the v1 "market is well-calibrated" verdict that
 overconfident edges are false edges. No summer data.
+
+## 13. Thin-margin HIGH BUY_NO gate (2026-05-23) — SHIPPED
+
+**Question (Chris):** does WHERE matcher μ sits relative to a bracket predict
+profit (μ=89.3 in the 88-89 bracket vs μ=88.5)?
+
+**Finding.** Within-bracket position is washed out for BUY_YES (matcher's ±2-3°F
+bracket-level error swamps the 1°F position). On the **BUY_NO** side it is strongly
+predictive: a HIGH B-bracket BUY_NO where μ sits **inside / barely outside** the
+bracket it shorts is a robust live-era loser. Faithful gated buy-at-open replay
+(2026-03-15..05-19, production windows, outcome = `market_meta.result` =
+CLI-authoritative): μ inside the shorted bracket → **WR 32%, −3.9c/bet**; the effect
+is **edge-INDEPENDENT** (still −8.6c holding model edge fixed in [12,20]pp) and
+negative in BOTH date-halves → the model's NO "edge" is illusory near the boundary
+(market out-calibrates it, §9 / v1 verdict). THIN-boundary complement of §12 (which
+trims the deep-SAFE T-tail). Nearly orthogonal to the (2t) in-bracket tail-bet gate
+(only catches the rare p_yes>0.5 case — modelled in the backtest it moves 2 bets).
+
+**CLI rounding/offset (Chris's follow-up).** The ±0.5°F bracket band + authoritative
+settlement were already handled → not a rounding artifact. Decomp: our obs runs
+**+0.5°F hot** vs CLI, the matcher **undershoots obs −0.2°F**, partly cancelling →
+net **μ→CLI offset ≈ +0.46°F median** (per-station ~0 at SAT/LAX/DFW, ~+0.9 at
+BOS/MIA/MSP). The HIGH BUY_NO WR-50% crossing sits ~+0.5°F *outside* the edge, matching
+the offset → the gate uses **(μ − offset)** inside-test, not raw μ.
+
+**SHIPPED.** `nn_shadow_worker._try_auto_execute` gate **(2d)**: HIGH B-bracket BUY_NO
+skipped when `(μ − offset[station]) ∈ [floor−0.5, cap+0.5]`. offset = per-station
+median(μ − yes_bracket_center) over the live era (`PUSH_NO_MU_CLI_OFFSET_BY_STATION`,
+`PUSH_NO_MU_CLI_OFFSET_DEFAULT`=+0.5 for unlisted incl. KDCA). Flag
+`PUSH_SKIP_NO_MU_NEAR_BRACKET` (revert = False + restart). Validation (faithful
+one-bet/day, prod windows): **+4.1→+7.6c/bet, +$7.9 incremental** over the shipped
+bot, WR 46→54%, ~28% fewer bets, both OOS halves + (early +$13.0→+$19.4, late
++$10.7→+$12.2); per-station helps 12 / hurts 6 (only SFO notably worse — a pre-existing
+net loser). Tests `tests/test_thin_margin_gate.py` (7). **Caveats:** only SKIPS (never
+shifts p_yes → distinct from the REVERTED median-bias correction, §9); offset is
+per-station pooled (per-station-month when more data exists; ~9 cells show early/late
+drift but the gate is robust to ±0.5°F offset noise); HIGH only (LOW flips sign);
+validated vs settlement (pure-nn settled n still small), rests on the v1 verdict.
