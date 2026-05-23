@@ -380,7 +380,7 @@ GUARDRAILS = {
     # 2026-05-20: raised 5 -> 15 (Chris directive). HIGH is the profitable book
     # (+$40 on 5/20 vs LOW -$24); lean bet size into it. pure_nn_decide sizing
     # reads this same value via the worker so qty is sized to match the cap.
-    "max_bet_high_series_usd": 15.0,  # 2026-05-22 (Chris): uniform $15 max per HIGH position, all stations. Clamps both HIGH sides to $15 (NO min(30,15), YES min(15,15)).
+    "max_bet_high_series_usd": 5.0,  # 2026-05-23 (Chris): uniform $5 max per HIGH position, all stations (lowered from $15). Clamps both HIGH sides to $5.
     # 2026-05-16 (evening): LOW-series brackets (KXLOW-*) capped at $5 alongside
     # HIGH while validating the nn_match k-NN heating-curve projector as the
     # primary μ source. Symmetric to max_bet_high_series_usd; applied at
@@ -491,7 +491,7 @@ SHADOW_NN_EVENT_DRIVEN: bool = True
 AUTO_EXECUTE_BUY_NO_PUSH: bool = True
 AUTO_EXECUTE_BUY_YES_PUSH: bool = True
 AUTO_EXEC_LOW_ENABLED: bool = True    # 2026-05-23 (Chris): ON as a $1 live probe (max_bet_low_series_usd=1, deep-pre-min window). Backtest: LOW BUY_NO loses crossing the wide spread; probe tests if live execution differs. Set False to re-pause.
-PUSH_HIGH_MAX_BET_DEFAULT: float = 15.0      # 2026-05-22 (Chris): $15 HIGH cap for ALL stations (uniform).
+PUSH_HIGH_MAX_BET_DEFAULT: float = 5.0       # 2026-05-23 (Chris): $5 HIGH cap for ALL stations (uniform; lowered from $15).
 PUSH_HIGH_MAX_BET_BY_STATION = {}  # 2026-05-22 (Chris): no per-station differentiation — all HIGH stations use the $15 default. Re-add a cell to override.
 PUSH_HIGH_NO_BET_BY_STATION = {}  # 2026-05-22 (Chris): removed the $30 MIA-NO carve-out — uniform $15 max for all HIGH now (PUSH_HIGH_MAX_BET_DEFAULT). NO-resize code in nn_shadow_worker stays but is dormant while empty; re-add {station: usd} to size a NO cell up.
 

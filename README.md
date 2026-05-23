@@ -4,6 +4,10 @@ A judgment-first Kalshi trading bot for daily weather markets. Claude is the
 entry+exit decision-maker; deterministic guardrails wrap the LLM so the
 worst-case blast radius is bounded by code, not by prompt quality.
 
+## HIGH max bet $15 -> $5 — 2026-05-23
+
+Per Chris: judgebot uniform HIGH max bet lowered $15 -> $5 (PUSH_HIGH_MAX_BET_DEFAULT=5, guardrail backstop max_bet_high_series_usd=5; dicts stay empty so it is uniform). LOW stays $1. v1max-high was already $5.
+
 ## HIGH spread filter + LOW $1 live probe — 2026-05-23
 
 **Spread analysis** (`tools/spread_analysis.py`): the bot buys NO by CROSSING
