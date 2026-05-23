@@ -380,7 +380,7 @@ GUARDRAILS = {
     # 2026-05-20: raised 5 -> 15 (Chris directive). HIGH is the profitable book
     # (+$40 on 5/20 vs LOW -$24); lean bet size into it. pure_nn_decide sizing
     # reads this same value via the worker so qty is sized to match the cap.
-    "max_bet_high_series_usd": 15.0,  # 2026-05-23 (Chris): backstop $15 so ROBUST cells size to $15. Per-station via PUSH_HIGH_MAX_BET_BY_STATION ($15 robust) else PUSH_HIGH_MAX_BET_DEFAULT ($3).
+    "max_bet_high_series_usd": 5.0,  # 2026-05-23 (Chris): $5 uniform HIGH cap for ALL stations (was $15 backstop for tiered $15-robust/$3-soft). Hard cap so no HIGH bet exceeds $5.
     # 2026-05-16 (evening): LOW-series brackets (KXLOW-*) capped at $5 alongside
     # HIGH while validating the nn_match k-NN heating-curve projector as the
     # primary μ source. Symmetric to max_bet_high_series_usd; applied at
@@ -491,14 +491,12 @@ SHADOW_NN_EVENT_DRIVEN: bool = True
 AUTO_EXECUTE_BUY_NO_PUSH: bool = True
 AUTO_EXECUTE_BUY_YES_PUSH: bool = True
 AUTO_EXEC_LOW_ENABLED: bool = True    # 2026-05-23 (Chris): ON as a $1 live probe (max_bet_low_series_usd=1, deep-pre-min window). Backtest: LOW BUY_NO loses crossing the wide spread; probe tests if live execution differs. Set False to re-pause.
-PUSH_HIGH_MAX_BET_DEFAULT: float = 3.0       # 2026-05-23 (Chris): $3 cap for SOFT/NEG/default HIGH cells (MSP/MSY/SFO/SAT/DCA). The 15 ROBUST cells get $15 via PUSH_HIGH_MAX_BET_BY_STATION.
+PUSH_HIGH_MAX_BET_DEFAULT: float = 5.0  # 2026-05-23 (Chris): $5 uniform cap for ALL HIGH stations (collapsed tiered $15-robust / $3-soft). BY_STATION emptied -> every station uses this default. Prior 15-station robust set recoverable from git (commit 66b530e).
 PUSH_HIGH_MAX_BET_BY_STATION = {
-    # 2026-05-23 (Chris): $15 for the 15 ROBUST 30-min windows (validated +PnL
-    # both date-halves). SOFT/NEG/default cells (MSP, MSY, SFO, SAT, DCA) are
-    # NOT listed -> they fall to PUSH_HIGH_MAX_BET_DEFAULT ($3).
-    "KATL": 15.0, "KAUS": 15.0, "KBOS": 15.0, "KDEN": 15.0, "KDFW": 15.0,
-    "KHOU": 15.0, "KLAS": 15.0, "KLAX": 15.0, "KMDW": 15.0, "KMIA": 15.0,
-    "KNYC": 15.0, "KOKC": 15.0, "KPHL": 15.0, "KPHX": 15.0, "KSEA": 15.0,
+    # 2026-05-23 (Chris): emptied -- collapsed the tiered $15-robust / $3-soft
+    # sizing to a flat $5 for ALL HIGH stations (PUSH_HIGH_MAX_BET_DEFAULT=5).
+    # The prior 15-station ROBUST set ($15) is recoverable from git (commit
+    # 66b530e); re-add {station: usd} to re-tier any cell above the default.
 }
 PUSH_HIGH_NO_BET_BY_STATION = {}  # 2026-05-22 (Chris): removed the $30 MIA-NO carve-out — uniform $15 max for all HIGH now (PUSH_HIGH_MAX_BET_DEFAULT). NO-resize code in nn_shadow_worker stays but is dormant while empty; re-add {station: usd} to size a NO cell up.
 
