@@ -545,7 +545,7 @@ PUSH_EARLY_TRIM_MAE_MAX: float = 1.6      # only "accurate" cells (full-size tie
 # early-trim OFF (below) since before=3.0 would otherwise be capped. Reversible:
 # set to None (and re-enable trim) to revert. Superseded by the per-(station,
 # month) regen once the full multi-year backfill lands. HIGHER VARIANCE (31% win).
-PUSH_HIGH_TEMP_WINDOW = (2.0, -1.0)   # (before, after) hrs vs peak; None=off. 2026-05-22: broad [peak-2,peak-1] fallback (pooled +3.0c/bet, both halves +) for stations not in BY_STATION (e.g. DCA).
+PUSH_HIGH_TEMP_WINDOW = (2.0, -1.5)   # (before, after); None=off. 2026-05-23: 30-min deep default [peak-2,peak-1.5], BEGINS at peak-2 (profitable deep zone). For stations not in BY_STATION.
 
 # 2026-05-22: per-station HIGH window overrides (v1, price-gated backtest, May
 # 2026 only; thin n~8-11/band -> regenerate from the deep historical backfill).
@@ -554,30 +554,32 @@ PUSH_HIGH_TEMP_WINDOW = (2.0, -1.0)   # (before, after) hrs vs peak; None=off. 2
 # all HIGH to the global. (before, after) hrs vs fractional peak; window =
 # [peak-before, peak+after]. AUS sits near-peak -- it LOSES deep pre-peak.
 PUSH_HIGH_TEMP_WINDOW_BY_STATION = {
-    # 2026-05-22 live-era (2026-03-15+) per-station BUY_NO profit sweep (faithful
-    # gated buy-at-open, early/late split). (before, after) = [peak-before,
-    # peak+after]; ALL close before peak (trading into peak is the losing zone).
-    # Flags: ROBUST = +PnL both halves n>=15; SOFT = one half negative; THIN =
-    # n<15; fallback = no own n>=10 -> broad (2.0,-1.0).
-    "KATL": (3.0, -1.5),   # ROBUST  n=30 +5.6
-    "KAUS": (2.0, -1.0),   # ROBUST  n=24 +7.7
-    "KBOS": (2.0, -1.5),   # ROBUST  n=25 +20.4
-    "KDEN": (1.5, -1.0),   # ROBUST  n=38 +2.9
-    "KDFW": (3.0, -1.5),   # SOFT    n=20 +2.1 (late half -3.0 -> watch, overfit risk)
-    "KHOU": (3.0, -1.5),   # THIN    n=12 +5.5
-    "KLAS": (2.0, -1.0),   # fallback (insufficient own data)
-    "KLAX": (3.0, -1.5),   # SOFT    n=34 +8.8 (late half -0.4)
-    "KMDW": (1.5, -1.0),   # ROBUST  n=41 +10.2
-    "KMIA": (2.0, -1.5),   # ROBUST  n=31 +12.9
-    "KMSP": (2.0, -1.0),   # fallback
-    "KMSY": (2.0, -1.0),   # fallback
-    "KNYC": (2.0, -1.5),   # ROBUST  n=45 +2.8 (dropped from $30 sizing -> base $5)
-    "KOKC": (2.0, -1.0),   # fallback
-    "KPHL": (2.0, -1.5),   # ROBUST  n=35 +2.1
-    "KPHX": (3.0, -1.0),   # ROBUST  n=20 +14.4
-    "KSAT": (2.0, -1.0),   # fallback
-    "KSEA": (2.0, -1.0),   # fallback
-    "KSFO": (2.0, -1.0),   # fallback
+    # 2026-05-23 FULL-data (post gap-fill) 30-MINUTE per-station BUY_NO windows.
+    # (before, after) = [peak-before, peak+after]; every window is 30 min and
+    # BEGINS at peak-before = the most-profitable buy-slot (bot buys at open).
+    # Faithful gated buy-at-open sweep, early/late split. Flags: ROBUST=+both
+    # halves; SOFT=one half negative; NEG=negative best (shipped per Chris "all
+    # stations"); default=no usable data.
+    "KATL": (3.5, -3.0),   # ROBUST  +9.2c  n=36
+    "KAUS": (2.5, -2.0),   # ROBUST  +11.4c n=21
+    "KBOS": (1.5, -1.0),   # ROBUST  +14.9c n=35
+    "KDCA": (2.0, -1.5),   # no data (stale projections) -> deep default
+    "KDEN": (2.0, -1.5),   # ROBUST  +5.5c  n=41
+    "KDFW": (2.5, -2.0),   # ROBUST  +19.6c n=24
+    "KHOU": (1.0, -0.5),   # ROBUST  +8.8c  n=32
+    "KLAS": (2.0, -1.5),   # ROBUST  +5.0c  n=49
+    "KLAX": (3.0, -2.5),   # ROBUST  +10.5c n=33
+    "KMDW": (1.0, -0.5),   # ROBUST  +10.2c n=41
+    "KMIA": (1.5, -1.0),   # ROBUST  +12.9c n=31
+    "KMSP": (1.5, -1.0),   # SOFT    +0.7c  n=31 (early half -10.8)
+    "KMSY": (2.5, -2.0),   # SOFT    +11.9c n=28 (late half -5.8)
+    "KNYC": (1.5, -1.0),   # ROBUST  +2.8c  n=45
+    "KOKC": (1.0, -0.5),   # ROBUST  +8.6c  n=28
+    "KPHL": (3.0, -2.5),   # ROBUST  +5.3c  n=43
+    "KPHX": (2.0, -1.5),   # ROBUST  +8.4c  n=27
+    "KSAT": (2.0, -1.5),   # NEG     -3.9c  n=26 (no +EV slot; shipped per "all stations")
+    "KSEA": (3.0, -2.5),   # ROBUST  +19.5c n=48
+    "KSFO": (3.5, -3.0),   # SOFT    +3.7c  n=48 (early half -2.9)
 }
 
 # 2026-05-22: LOW placeholder window (analog to PUSH_HIGH_TEMP_WINDOW). The

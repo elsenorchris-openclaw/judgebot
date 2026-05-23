@@ -4,6 +4,30 @@ A judgment-first Kalshi trading bot for daily weather markets. Claude is the
 entry+exit decision-maker; deterministic guardrails wrap the LLM so the
 worst-case blast radius is bounded by code, not by prompt quality.
 
+## 30-min per-station HIGH windows + DB gap-fill + LOW no-edge — 2026-05-23
+
+**(1) Fixed a backtest-DB capture gap.** The historical backfill only served
+pre-67d data, so **1,639 live-era market-days were missing across all 40
+series** — the "thinly traded" HIGH stations and the LOW "illiquidity wall"
+were both this gap, not real signals. Filled from Kalshi's live settled
+endpoint + series candlesticks (+359k candles, `.close_dollars` schema);
+`tools/db_audit.py` confirms 0 gaps.
+
+**(2) Narrowed HIGH windows to 30 MINUTES, per station.** Re-ran the BUY_NO
+sweep on full data; each window is 30 min and **begins at the most-profitable
+buy-slot** (the bot buys at window-open), i.e. (before, after)=(X, 0.5-X). 15/20
+are ROBUST (+PnL both date-halves): e.g. SEA peak-3.0 +19.5c, DFW peak-2.5
++19.6c, BOS peak-1.5 +14.9c, MIA peak-1.5 +12.9c. MSP/MSY/SFO are SOFT (one
+half negative, flagged); SAT is NEG (no +EV slot) and DCA uses the deep default
+(its model projections are stale) — both shipped per Chris's "all stations".
+Global default also 30-min: (2.0,-1.5).
+
+**(3) LOW re-analysis — now backtestable, and it's a no.** With full data
+(n=1837), LOW BUY_NO is NEGATIVE at every offset in both halves (deep-pre-min
+-7.0c, near-min -14.7c). The thin-data "near-min +14.2c" was noise (flipped to
+-14.7). **LOW stays PAUSED** — now confirmed by real data, not a gap.
+Tools: `db_audit.py`, `fill_gap.py`, `window_30min_sweep.py`, `low_gated_split.py`.
+
 ## Uniform $15 HIGH max bet (all stations) — 2026-05-22
 
 Per Chris: every HIGH position caps at **$15**, all stations — replacing the
