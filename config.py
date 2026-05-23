@@ -642,6 +642,16 @@ USE_PUSH_REGIME_MAE_ADJ: bool = True
 # 2.4-3.2->2.32, >3.2->3.61 still matches the 1.0/0.7/0.5/0.3 multipliers).
 PUSH_REGIME_MAE_DAMP: float = 1.0
 
+# Empirical tail-loss correction for open-ended T brackets (nn_shadow_strategy).
+# The kNN matcher's Gaussian P(YES) under-states the fat-surprise tail (HIGH hot
+# / LOW cold): measured Nov-2024→May-2026 (n≈5500, rm-conditioned, cross-station
+# stable), realized loss on deep-margin tail BUY_NO is ~2× model at 2σ, ~5–10×
+# at 2.5σ. When True, P(YES) of the fat tail is raised to the empirical floor so
+# overconfident "deep-safe" tail BUY_NO deflate below the edge floor. Interior B
+# brackets are well-calibrated and untouched. NOT a fix for interior over-
+# projection losses (e.g. MIA 5/21), which are irreducible variance.
+USE_TAIL_EMPIRICAL_PYES: bool = True
+
 # Minimum edge_pp (percentage-points of P(direction) − market_implied) for
 # nn_shadow_strategy.pure_nn_decide to fire. Default in the function is 6pp;
 # we raise to 12pp based on 2026-05-20 backtest on n=196 trades (166 settled

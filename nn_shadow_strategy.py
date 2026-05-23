@@ -68,6 +68,35 @@ def _yes_window(floor, cap) -> tuple[float, float]:
     return (_NEGINF, _INF)  # malformed
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Empirical tail-loss calibration (T brackets only)
+# ─────────────────────────────────────────────────────────────────────────────
+# The kNN matcher's Gaussian tail under-states extreme-surprise probability:
+# measured over Nov-2024→May-2026 (n≈5500, cross-station stable, rm-conditioned),
+# the realized chance the extreme reaches m·σ into the fat tail far exceeds
+# Φ(−m) for m≳1 — by ~2× at 2σ and ~5–10× at 2.5σ. This makes deep-margin
+# BUY_NO on open-ended T brackets (HIGH hot tail / LOW cold tail) overconfident.
+# Tables: margin m (σ units) → realized tail probability. HIGH=hot upper tail,
+# LOW=cold lower tail. Interior B brackets are well-calibrated and untouched.
+_EMP_TAIL_HIGH = [(1.0, 0.150), (1.5, 0.084), (2.0, 0.047), (2.5, 0.031)]
+_EMP_TAIL_LOW = [(1.0, 0.181), (1.5, 0.124), (2.0, 0.093), (2.5, 0.067)]
+
+
+def _emp_tail_p(is_high: bool, m: float) -> float:
+    """Empirical P(extreme reaches ≥ m·σ into the fat tail). Linear-interpolated
+    within the measured range [1.0, 2.5]; flat-capped beyond it (no Gaussian
+    extrapolation past the data)."""
+    tbl = _EMP_TAIL_HIGH if is_high else _EMP_TAIL_LOW
+    if m <= tbl[0][0]:
+        return tbl[0][1]
+    if m >= tbl[-1][0]:
+        return tbl[-1][1]
+    for (m0, p0), (m1, p1) in zip(tbl, tbl[1:]):
+        if m0 <= m <= m1:
+            return p0 + (p1 - p0) * (m - m0) / (m1 - m0)
+    return tbl[-1][1]
+
+
 def _p_yes_constrained(mu: float, sigma: float, floor, cap,
                        rm, is_high: bool) -> float:
     """Compute P(YES | physical rm constraint).
@@ -222,6 +251,7 @@ def pure_nn_decide(
     series_cap_low_usd: float = 5.0,
     min_buy_usd: float = 1.0,
     ticker_remaining_usd: float = 5.0,
+    use_tail_empirical: bool = False,
 ) -> dict[str, Any]:
     """Decide what pure-nn would do on this packet. See module docstring."""
     out: dict[str, Any] = {
@@ -295,6 +325,20 @@ def pure_nn_decide(
         shape = "T-warm"
     p_yes = _p_yes_constrained(mu, sigma, floor, cap, rm, is_high)
     p_yes = max(0.0, min(1.0, p_yes))
+    # Empirical tail-loss correction (flag-gated). Only open-ended T brackets
+    # whose YES region is the FAT-surprise tail: HIGH warm-tail (max ≥ floor)
+    # and LOW cold-tail (min ≤ cap). Raise P(YES) of that tail to the empirical
+    # floor so edge/sizing stop over-trusting "deep-safe" tail BUY_NO. Never
+    # lowers P(YES) (max), so it can only deflate the overconfident side;
+    # interior B and thin-tail T are untouched.
+    if use_tail_empirical and sigma > 0:
+        if is_high and cap is None and floor is not None:        # HIGH T-warm
+            m = (floor + 0.5 - mu) / sigma
+            p_yes = max(p_yes, _emp_tail_p(True, m))
+        elif (not is_high) and floor is None and cap is not None:  # LOW T-cold
+            m = (mu - (cap - 0.5)) / sigma
+            p_yes = max(p_yes, _emp_tail_p(False, m))
+        p_yes = max(0.0, min(1.0, p_yes))
     p_no = 1.0 - p_yes
 
     yes_ask = packet.get("yes_ask_c")

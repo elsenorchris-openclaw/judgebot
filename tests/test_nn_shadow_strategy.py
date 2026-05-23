@@ -246,5 +246,64 @@ class TestRmLocked(unittest.TestCase):
         self.assertFalse(locked)
 
 
+class TestTailEmpiricalCorrection(unittest.TestCase):
+    """Empirical tail-loss correction for open-ended T brackets (flag-gated).
+
+    Mechanism validated over Nov-2024→May-2026 sidecar data: the kNN matcher's
+    Gaussian P(YES) under-states the fat-surprise tail (HIGH hot / LOW cold), so
+    deep-margin tail BUY_NO is overconfident. The correction raises P(YES) of
+    the fat tail to the empirical floor via max() (never lowers it); interior B
+    and thin-tail T are untouched.
+    """
+
+    @staticmethod
+    def _tpkt(series, floor, cap, mu, sig, ya=10, na=85):
+        return {
+            "mu_method": "nn_match_x", "mu_chosen": mu, "sigma_chosen": sig,
+            "floor": floor, "cap": cap, "series": series, "days_out": 0,
+            "yes_ask_c": ya, "no_ask_c": na,
+        }
+
+    def test_flag_off_is_uncorrected(self):
+        d = nss.pure_nn_decide(self._tpkt("KXHIGH", 94.0, None, 90.0, 2.0),
+                               edge_max=1.0, use_tail_empirical=False)
+        self.assertLess(d["p_yes"], 0.03)  # thin Gaussian tail
+
+    def test_high_twarm_raised_to_empirical(self):
+        off = nss.pure_nn_decide(self._tpkt("KXHIGH", 94.0, None, 90.0, 2.0),
+                                 edge_max=1.0, use_tail_empirical=False)
+        on = nss.pure_nn_decide(self._tpkt("KXHIGH", 94.0, None, 90.0, 2.0),
+                                edge_max=1.0, use_tail_empirical=True)
+        self.assertGreater(on["p_yes"], off["p_yes"])
+        self.assertAlmostEqual(on["p_yes"], 0.039, delta=0.008)
+
+    def test_low_tcold_raised_to_empirical(self):
+        off = nss.pure_nn_decide(self._tpkt("KXLOW", None, 50.0, 54.0, 2.0),
+                                 edge_max=1.0, use_tail_empirical=False)
+        on = nss.pure_nn_decide(self._tpkt("KXLOW", None, 50.0, 54.0, 2.0),
+                                edge_max=1.0, use_tail_empirical=True)
+        self.assertGreater(on["p_yes"], off["p_yes"])
+        self.assertGreater(on["p_yes"], 0.06)
+
+    def test_interior_b_untouched(self):
+        p = self._tpkt("KXHIGH", 88.0, 89.0, 90.0, 2.0, ya=40, na=55)
+        off = nss.pure_nn_decide(p, edge_max=1.0, use_tail_empirical=False)
+        on = nss.pure_nn_decide(p, edge_max=1.0, use_tail_empirical=True)
+        self.assertAlmostEqual(off["p_yes"], on["p_yes"], places=9)
+
+    def test_thin_tail_high_tcold_untouched(self):
+        off = nss.pure_nn_decide(self._tpkt("KXHIGH", None, 86.0, 90.0, 2.0),
+                                 edge_max=1.0, use_tail_empirical=False)
+        on = nss.pure_nn_decide(self._tpkt("KXHIGH", None, 86.0, 90.0, 2.0),
+                                edge_max=1.0, use_tail_empirical=True)
+        self.assertAlmostEqual(off["p_yes"], on["p_yes"], places=9)
+
+    def test_low_margin_fat_t_untouched(self):
+        p = self._tpkt("KXHIGH", 90.0, None, 90.0, 2.0, ya=40, na=55)
+        off = nss.pure_nn_decide(p, edge_max=1.0, use_tail_empirical=False)
+        on = nss.pure_nn_decide(p, edge_max=1.0, use_tail_empirical=True)
+        self.assertAlmostEqual(off["p_yes"], on["p_yes"], places=9)
+
+
 if __name__ == "__main__":
     unittest.main()
