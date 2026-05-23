@@ -4,6 +4,25 @@ A judgment-first Kalshi trading bot for daily weather markets. Claude is the
 entry+exit decision-maker; deterministic guardrails wrap the LLM so the
 worst-case blast radius is bounded by code, not by prompt quality.
 
+## HIGH spread filter + LOW $1 live probe — 2026-05-23
+
+**Spread analysis** (`tools/spread_analysis.py`): the bot buys NO by CROSSING
+(cost = 100 - yes_bid), so a wide bid-ask eats the edge. HIGH markets are tight
+(median 4c) and +EV, but the rare wide-spread HIGH bets are catastrophic
+(spread 15-30c -> -21.8c/bet, 30c+ -> -31.3c). **Added a HIGH spread gate**
+(`PUSH_MAX_SPREAD_C_HIGH=15`): skip HIGH push BUY when yes_ask-yes_bid > 15c.
+Validated +1.0 -> +1.9c/bet OOS, both date-halves (`tools/spread_validate.py`).
+
+**LOW back ON as a $1 live probe** (`AUTO_EXEC_LOW_ENABLED=True`,
+`max_bet_low_series_usd=1`). LOW markets are very wide (median 17c spread), so
+crossing loses (-8c/bet) -- BUT the directional model is fine (52% WR) and at MID
+it's +1.8c: the loss is execution, not signal. The $1 probe tests whether live
+fills beat the aggressive-cross backtest. Pointed at the LEAST-BAD deep-pre-min
+window `PUSH_LOW_TEMP_WINDOW=(2.5,-2.0)` [min-2.5,min-2.0] (offset curve -4.3c
+there vs -15c near/post-min, which the old (0.5,1.5) wrongly targeted). LOW is
+NOT spread-filtered (so the probe trades). Expect small losses -- it's a probe,
+not a validated edge. `AUTO_EXEC_LOW_ENABLED=False` to re-pause.
+
 ## 30-min per-station HIGH windows + DB gap-fill + LOW no-edge — 2026-05-23
 
 **(1) Fixed a backtest-DB capture gap.** The historical backfill only served

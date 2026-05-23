@@ -845,6 +845,15 @@ def _try_auto_execute(cand, packet: dict, decision: dict,
     in_win, win_dbg = _in_decision_window(cand.station, series, local_hour, cand.climate_day)
     if not in_win:
         return False, f"outside_window {cand.station}/{series}/{short_dir}: {win_dbg}"
+    # (2-spread) HIGH-only spread gate: crossing a wide bid-ask to buy pays
+    # away the edge -- backtest HIGH spread>15c loses -21..-31c/bet vs +1.9c
+    # filtered (both date-halves OOS). LOW left unfiltered ($1 live probe).
+    if series == "HIGH":
+        _msp = float(getattr(_cfg, "PUSH_MAX_SPREAD_C_HIGH", 0) or 0)
+        if _msp > 0:
+            _yb = packet.get("yes_bid_c"); _ya = packet.get("yes_ask_c")
+            if _yb is not None and _ya is not None and (_ya - _yb) > _msp:
+                return False, f"spread_too_wide {_ya - _yb:.0f}c>{_msp:.0f}c"
     # (2a) HIGH-only: block at-or-past-peak entries. At peak, rm has converged
     # on the day's true max, leaving no headroom for the nn_match mu to add
     # real signal -- instead it over-extrapolates and flips adjacent brackets

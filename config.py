@@ -391,7 +391,7 @@ GUARDRAILS = {
     # smaller LOW min-buy (PUSH_MIN_BUY_USD_LOW) into pure_nn_decide so the
     # integer-contract math doesn't collapse the way $5/$5 did on 2026-05-17
     # (min_buy == series_cap => no integer qty fits => all LOW buys skip).
-    "max_bet_low_series_usd": 5.0,  # 2026-05-22 raised 1.0->5.0: LOW is now a positive book (faithful near-min 65%, n=23)
+    "max_bet_low_series_usd": 1.0,  # 2026-05-23 (Chris): $1 LOW max -- LOW auto-exec back ON as a $1 live probe (backtest: crossing the wide LOW spread loses; this tests live execution).
     # Legacy single-cap field — kept for any reader unaware of side-specific
     # caps. Set to the higher of the two so generic checks don't false-positive.
     "max_bet_usd": 30.0,
@@ -490,7 +490,7 @@ SHADOW_NN_EVENT_DRIVEN: bool = True
 # Direction toggles ON — pure-code architecture per Chris 2026-05-19.
 AUTO_EXECUTE_BUY_NO_PUSH: bool = True
 AUTO_EXECUTE_BUY_YES_PUSH: bool = True
-AUTO_EXEC_LOW_ENABLED: bool = False   # 2026-05-22 PAUSED per Chris -- LOW over-trades pre-dawn into illiquid books (phantom MTM). Set True to resume.
+AUTO_EXEC_LOW_ENABLED: bool = True    # 2026-05-23 (Chris): ON as a $1 live probe (max_bet_low_series_usd=1, deep-pre-min window). Backtest: LOW BUY_NO loses crossing the wide spread; probe tests if live execution differs. Set False to re-pause.
 PUSH_HIGH_MAX_BET_DEFAULT: float = 15.0      # 2026-05-22 (Chris): $15 HIGH cap for ALL stations (uniform).
 PUSH_HIGH_MAX_BET_BY_STATION = {}  # 2026-05-22 (Chris): no per-station differentiation — all HIGH stations use the $15 default. Re-add a cell to override.
 PUSH_HIGH_NO_BET_BY_STATION = {}  # 2026-05-22 (Chris): removed the $30 MIA-NO carve-out — uniform $15 max for all HIGH now (PUSH_HIGH_MAX_BET_DEFAULT). NO-resize code in nn_shadow_worker stays but is dormant while empty; re-add {station: usd} to size a NO cell up.
@@ -589,7 +589,7 @@ PUSH_HIGH_TEMP_WINDOW_BY_STATION = {
 # price-gated per-cell regen. The offset is global but anchored to each
 # station's OWN min time. (before, after): window = [min-before, min+after].
 # Reversible: set PUSH_LOW_TEMP_WINDOW=None to revert all LOW to the overrides.
-PUSH_LOW_TEMP_WINDOW = (0.5, 1.5)
+PUSH_LOW_TEMP_WINDOW = (2.5, -2.0)   # 2026-05-23: 30-min deep-pre-min [min-2.5,min-2.0], BEGINS at min-2.5h = the offset curve LEAST-BAD LOW zone (-4.3c vs -15c near/post-min, which the old (0.5,1.5) targeted -- the worst). Still -EV crossing; $1 probe tests live exec. (Supersedes the near/post-min note above.)
 PUSH_TEMP_WINDOW_MONTHS = {5}   # 2026-05-22: months the per-station temp windows are active (May = profit-optimized). Other months fall to the month-keyed PUSH_WINDOW_OVERRIDES table.
 PUSH_LOW_TEMP_WINDOW_BY_STATION = {}
 
@@ -709,6 +709,7 @@ PUSH_MAX_ENTRY_C: int = 80
 # (wethr cache doesn't currently emit precip_in_h). Set to 999 / -1 to disable.
 PUSH_MIN_VSBY_MI: float = 0.5              # visibility < 0.5 mi (dense fog / heavy precip) → skip
 PUSH_MAX_WIND_MPH: float = 40.0            # sustained wind or gust > 40 mph (~35 kt) → skip
+PUSH_MAX_SPREAD_C_HIGH: float = 15.0       # 2026-05-23: skip HIGH push BUY when (yes_ask - yes_bid) > 15c. Crossing a wide spread pays away the edge; backtest HIGH spread>15c = -21..-31c/bet vs +1.9c filtered (both halves OOS). LOW NOT filtered (it is a $1 probe). 0 = off.
 
 # 2026-05-21: LOW cold-front gate ("Tier 1.5"). Distinct from PUSH_MAX_WIND_MPH
 # above (40 mph, both sides, catastrophic). Sustained wind ≥ ~15 kt at an
