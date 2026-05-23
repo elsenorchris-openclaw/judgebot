@@ -3615,6 +3615,12 @@ def execute_buy(rt: Runtime, cand: market_universe.Candidate,
         return
 
     min_buy = config.GUARDRAILS.get("min_buy_usd", 0.0)
+    if cand.ticker.startswith("KXLOW"):
+        # 2026-05-23: LOW $1-probe. The global $1 min_buy_usd floor rejects a
+        # 1-contract LOW buy (~$0.60-0.80) at the $1 cap ("reachable $0.60 <
+        # floor $1.00"), so LOW never places an order. Use the LOW-specific
+        # floor (PUSH_MIN_BUY_USD_LOW=$0.40) so the scout passes.
+        min_buy = float(getattr(config, "PUSH_MIN_BUY_USD_LOW", min_buy))
     max_price_cents = int(config.GUARDRAILS.get("max_price_cents", 90))
 
     # ── Sizing path: TOP-UP uses simple gap-to-min_buy; FRESH uses scout.

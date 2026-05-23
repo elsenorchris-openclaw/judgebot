@@ -4,6 +4,10 @@ A judgment-first Kalshi trading bot for daily weather markets. Claude is the
 entry+exit decision-maker; deterministic guardrails wrap the LLM so the
 worst-case blast radius is bounded by code, not by prompt quality.
 
+## LOW $1-probe min-buy floor fix — 2026-05-23
+
+The $1 LOW probe never placed an order: execute_buy used the global $1 min_buy_usd floor as the scout floor_cost, so a 1-contract LOW buy (~$0.60-0.80) at the $1 cap was rejected ("reachable $0.60 < floor $1.00"). The bot CROSSES (+1c over ask), so it was not a fill/posting issue -- the order was skipped pre-placement. Fix: execute_buy now uses PUSH_MIN_BUY_USD_LOW ($0.40) as the floor for KXLOW* tickers. LOW can now place 1-contract orders. (Coverage is still sparse -- ~78% of LOW evals get no matcher projection -- so LOW trades infrequently.)
+
 ## HIGH max bet $15 -> $5 — 2026-05-23
 
 Per Chris: judgebot uniform HIGH max bet lowered $15 -> $5 (PUSH_HIGH_MAX_BET_DEFAULT=5, guardrail backstop max_bet_high_series_usd=5; dicts stay empty so it is uniform). LOW stays $1. v1max-high was already $5.
