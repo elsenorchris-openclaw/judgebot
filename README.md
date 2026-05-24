@@ -1,19 +1,355 @@
-# paper_judge_bot — Claude-as-Trader Weather Bot
+# paper_judge_bot — pure-code weather-bracket trading bot
 
-A judgment-first Kalshi trading bot for daily weather markets. Claude is the
-entry+exit decision-maker; deterministic guardrails wrap the LLM so the
-worst-case blast radius is bounded by code, not by prompt quality.
+> **Current state (2026-05-23).** This bot trades Kalshi daily **HIGH/LOW temperature
+> bracket** markets for 20 US cities. It runs a **pure-code, event-driven
+> auto-executor** driven by a k-nearest-neighbor "analog day" temperature
+> forecaster. The original LLM ("Claude-as-Trader") entry/exit design still lives in
+> the tree but is **dormant** — `LLM_DISPATCH_MODE="off"` and `ENABLE_SELLS=False`,
+> so neither the Claude entry loop nor the exit loop runs. Everything in this
+> reference describes how the bot **actually runs today**. The **Change log**
+> further down is the dated history of how it got here; the older LLM-first
+> reference sections have been removed (that history is in the change log).
 
-## Shadow log records mu + gate-aware daily replay — 2026-05-23
+> ⚠️ Bot lives on the VPS at `ubuntu@54.225.174.220:/home/ubuntu/paper_judge_bot`
+> (systemd `paper-judge-bot.service`, git repo `judgebot.git`, branch `main`).
+> **SSH first — local checkouts are stale.**
 
-The shadow log now records **mu_chosen** (raw matcher mu) per evaluation, so the daily
-window replay (tools/replay_windows.py) can apply the **(2d) thin-margin B-bracket gate**
-(which needs mu). The replay now reports **NO-GATE vs WITH-GATE** (the live bot) so the
-gate's daily contribution is visible. NOTE: 2026-05-22 could NOT be gate-tested -- no mu
-source existed for it (recorder did not log mu; phq_ext ends 05-20). Full gate-aware
-replays begin ~2026-05-24 (once a full day of mu-logged entries exists). The gate's value
-(+7.6c/bet, both OOS halves) was validated by the prior session on the full live era; it
-only SKIPS a bet (never flips a side).
+---
+
+## TL;DR — how it trades now
+
+- **Universe:** day-0 only (`DAYS_OUT_RANGE=(0,)`), 20 cities, both `KXHIGH*`
+  (daily-high) and `KXLOWT*` (daily-low) 2 °F bracket markets.
+- **Signal:** kNN analog matcher (`nn_match_fast.predict`) over a 2000–2025 1-min
+  ASOS trace DB → μ (projected daily extreme) + σ.
+- **Decision:** `nn_shadow_strategy.pure_nn_decide` turns μ/σ + bracket geometry +
+  the live running extreme into P(YES), picks the higher-edge side
+  (BUY_YES / BUY_NO) and sizes it.
+- **Execution:** `nn_shadow_worker` fires on live market + weather events and, if a
+  stack of gates passes, places a **real Kalshi order** via
+  `paper_judge_bot.execute_buy`. Every decision is logged to
+  `data/shadow_nn_strategy.jsonl`.
+- **No LLM in the trade loop. No selling — positions are held to settlement.**
+- **Mode:** `MODE="trader"` on the shared **v2 / account-2** Kalshi wallet (co-exists
+  with the V2-max and V2-min bots).
+
+---
+
+## Process model
+
+`main()` (in `paper_judge_bot.py`) starts, in order:
+
+1. `obs_refresh.start()` — background thread priming NWS obs for all stations (~90 s).
+2. `wethr_rm.start()` — running-min/max client over the shared wethr cache (no-op
+   thread; the cache is owned by an external service).
+3. `kalshi_ws.start(kalshi_client._sign, …)` — one authenticated WebSocket
+   (RSA-PSS, **reusing the REST signer**) maintaining a live BBO/orderbook cache
+   with an inversion/drift guard.
+4. **`nn_shadow_worker.start(rt)`** — the trading engine (gated by
+   `SHADOW_NN_EVENT_DRIVEN=True`).
+5. The `one_cycle` maintenance loop, every `EXIT_CYCLE_SEC` (120 s).
+
+With the LLM off, **`one_cycle` is quiet maintenance only — it does not trade**:
+
+- `reconcile_positions_with_kalshi` — authoritative `/portfolio/positions` read;
+- subscribe the **full candidate universe** to the WS (so the worker receives BBO
+  events for every market — this is what feeds the trading engine);
+- halt the cycle + Discord-alert if the wethr feed is degraded;
+- `_resolve_settlements` — log settled outcomes;
+- hourly Discord summary.
+
+`run_entry_loop` is **skipped outright** when `LLM_DISPATCH_MODE="off"` (and even if
+reached, the dispatch gate empties the survivor list). The exit loop is skipped
+because `ENABLE_SELLS=False`. All actual buying happens **asynchronously in the push
+worker**, off the cycle clock.
+
+---
+
+## The trading engine: `nn_shadow_worker`
+
+> The module is historically named "shadow," but it is the **live auto-trader** — it
+> places real orders. (Its file docstring still says "No orders are placed"; that
+> line is stale.)
+
+### Triggers
+A ticker is (re-)evaluated on any of:
+- a **Kalshi WS BBO change** (`_on_bbo_change`; ignores sub-1 ¢ flutter);
+- a **wethr SSE event** over a Unix socket (`/tmp/wethr_events.sock`, sub-50 ms);
+- a **5 s file-poll** of `wethr_cache.json` (fallback if the socket drops).
+
+Each evaluation is per-ticker mutex'd + 30 s-debounced.
+
+### Per-evaluation flow (`_evaluate_ticker`)
+1. Parse ticker → `Candidate`; patch T-bracket floor/cap from the Kalshi market
+   record (cached per ticker).
+2. `_build_shadow_packet`: BBO (from `kalshi_ws`), live obs + 30/60-min trends (from
+   `shared_cache_reader` over `wethr_cache.json`), local solar clock, the running
+   extreme (`high_f`/`low_f`), and the **F1 rm-staleness check**
+   (`wethr_rm.validate_rm_for_climate_day` — nulls a stale running extreme so a prior
+   climate-day reading can't anchor today).
+3. Look up the push override (window / bias / MAE) for `(station, side, month)`.
+4. `nn_shadow.shadow_nn_proj(pkt)` → `nn_match_fast.predict` → μ, σ (+ neighbor
+   distribution).
+5. Build the sizing budget: per-series cap × MAE-confidence multiplier
+   (regime-adjusted; only ever shrinks).
+6. `pure_nn_decide` → BUY_YES / BUY_NO / SKIP with edge, P(YES), qty, price.
+7. If a BUY: `_try_auto_execute` runs the gate stack; on pass, `execute_buy` places
+   the order (which re-runs `guardrails.check_buy`).
+8. Log the full decision to `data/shadow_nn_strategy.jsonl`.
+
+### The signal — `nn_match_fast.predict`
+- Source: `/home/ubuntu/data/heating_traces.sqlite` — 1-min ASOS traces, 2000–2025,
+  ~8–9 k days/station × 20 stations, packed as 288×5-min bins.
+- Finds today's intraday trajectory's nearest historical analogs: L2 distance over
+  the temperature trace in `[sunrise−30 min, now]`, plus weighted dewpoint / wind /
+  sky / RH / station-pressure penalties; takes top-k (k=50 both sides).
+- μ = current temp + aggregated neighbor delta-to-extreme + bias correction.
+  Aggregator is side-specific (`NN_USE_NEW_AGGREGATORS=True`): **HIGH** = inverse-cube-
+  distance-weighted mean (idw3); **LOW** = winsorized-10/90 mean of the closest 20.
+- Physical constraints: HIGH μ floored at the running max; **two-tier HIGH peak
+  clamp** near/after the historical peak time; LOW locks to the trajectory min only
+  after 21:00 LST (`NN_LOCK_FLOOR_LST_MIN`).
+- **Returns null μ → the bot skips** on: the fit-quality gate (analog cluster too
+  dispersed, thresh 3.0) and the LOW-post-noon-unlocked gate.
+- σ = neighbor spread × side σ-factor (0.90 HIGH / 1.10 LOW-AM).
+
+### The decision — `nn_shadow_strategy.pure_nn_decide`
+- Gate: μ must come from `nn_match_*` (else SKIP).
+- d+0 **rm constraint**: truncate the Gaussian to the physically-possible half-line
+  (HIGH day-high ≥ running max; LOW day-low ≤ running min) — a Bayesian truncation,
+  not a hard `max(μ, rm)` clamp.
+- P(YES) = Gaussian mass in the YES window: **B** = `[floor−0.5, cap+0.5)`;
+  **T-warm** = `[floor+0.5, ∞)`; **T-cold** = `(−∞, cap−0.5)`.
+- **Empirical tail-loss correction (`USE_TAIL_EMPIRICAL_PYES=True`):** for open-ended
+  T brackets, raises P(YES) of the fat-surprise tail to an empirically-measured floor
+  (the Gaussian under-states it ~2–10× at 2–2.5 σ). Only ever *deflates* an
+  overconfident deep-margin tail BUY_NO.
+- Edge = P(side) − ask; pick the higher-edge side. An rm-lock lets a high-edge bet
+  bypass the in-function edge ceiling.
+- Size = `min(series_cap, ticker_remaining) // price`, floored to whole contracts,
+  must clear `min_buy` (else qty 0 → SKIP).
+
+### The gate stack — `_try_auto_execute` (the real risk controls)
+A BUY is rejected unless it clears every gate, in execution order:
+
+| Gate | Rule (config flag) |
+|---|---|
+| Edge floor | `edge ≥ PUSH_MIN_EDGE_PP` (**12 pp**) |
+| In-bracket tail-bet | if μ sits inside the YES window but the chosen side is the tail (p_chosen < 0.5), require `PUSH_TAIL_BET_MIN_EDGE_PP` (**25 pp**) |
+| Direction toggle | `AUTO_EXECUTE_BUY_{NO,YES}_PUSH` (both **True**) |
+| LOW enabled | `AUTO_EXEC_LOW_ENABLED` (**True** — $1 live probe) |
+| Decision window | hour ∈ `[peak−before, peak+after]` (see **Windows**) |
+| HIGH spread | skip if `yes_ask − yes_bid > PUSH_MAX_SPREAD_C_HIGH` (**15 ¢**) — crossing a wide book pays away the edge |
+| HIGH h₂peak | `PUSH_MIN_H_TO_PEAK_HIGH` (**None / disabled** — windows already end ≥ 1 h pre-peak) |
+| HIGH thin-margin NO | skip BUY_NO when `(μ − per-station CLI offset)` lands inside `[floor−0.5, cap+0.5]` — i.e. shorting a bracket your own μ points into (`PUSH_SKIP_NO_MU_NEAR_BRACKET=True`) |
+| Tier-1 physics | skip if visibility < `PUSH_MIN_VSBY_MI` (0.5 mi) or wind/gust > `PUSH_MAX_WIND_MPH` (40) |
+| LOW cold-front | skip LOW if sustained wind ≥ `PUSH_LOW_FRONT_WIND_MPH` (18 mph); excludes KLAX/KMIA |
+| Price band | ask ∈ `[PUSH_MIN_ENTRY_C` (10) / `PUSH_MIN_ENTRY_C_BUY_YES` (30), `PUSH_MAX_ENTRY_C` (80)] ¢ |
+| Position dedup | never add to an existing position on the exact ticker |
+| Position cap | ≤ `PUSH_MAX_TICKERS_PER_STATION_SIDE_DIRECTION` (1) per (station, series, direction), **scoped to climate-day** |
+| Cash | wallet balance ≥ min_buy |
+| Correlation cap | ≤ `GUARDRAILS["max_buys_per_station_side"]` (1) per (station, HIGH/LOW, day) |
+
+`execute_buy` then re-runs the deterministic `guardrails.check_buy` (same caps) before
+the Kalshi POST — so the worker's sizing must match the caps or the order is rejected
+(guardrails *reject*, they don't truncate).
+
+### Windows
+- Trading windows are **per-(station, side, month)**, read solely from
+  `push_window_overrides.PUSH_WINDOW_OVERRIDES`. The peak/min hour is the 5-yr
+  10-day-rolling fractional P50 (`USE_FRACTIONAL_PEAK_FOR_WINDOW=True`); window =
+  `[peak − before, peak + after]`. **There is no default fallback** — a missing cell
+  (or missing peak) is not traded and fires a throttled Discord alert.
+- **May override (the current month):** for `month ∈ PUSH_TEMP_WINDOW_MONTHS` (`{5}`)
+  the table window is *replaced* by the price-gated per-station 30-min windows in
+  `PUSH_HIGH_TEMP_WINDOW_BY_STATION` (HIGH) / `PUSH_LOW_TEMP_WINDOW` (LOW). **So in May
+  the overrides table is bypassed**; other months use the table.
+- The HIGH early-side trim (`PUSH_EARLY_TRIM_HIGH_ENABLED`) is **off** (the
+  deep-pre-peak temp windows need the early offsets).
+
+### Sizing (current)
+- **HIGH:** `PUSH_HIGH_MAX_BET_BY_STATION` = **$15** for the 15 robust cells;
+  everything else (MSP/MSY/SFO/SAT/DCA + unlisted) = `PUSH_HIGH_MAX_BET_DEFAULT`
+  (**$3**).
+- **LOW:** `max_bet_low_series_usd` = **$1** — a live-execution probe (backtest says
+  crossing the wide LOW spread is −EV), with a $0.40 min-buy floor so the
+  integer-contract math doesn't collapse.
+- **MAE-confidence sizing on** (`USE_PUSH_MAE_SIZING`, regime-adjusted via
+  `USE_PUSH_REGIME_MAE_ADJ`) — scales bets **down** where the matcher's historical
+  accuracy is worse; never up.
+- **Per-cell median-bias correction OFF** (`USE_PUSH_BIAS_CORRECTION=False`,
+  reverted — it flipped winners on a cold day). Bias is logged, not applied.
+
+---
+
+## Guardrails (`guardrails.py`) — deterministic, non-overridable
+
+`check_buy` enforces (current `config.GUARDRAILS`): side caps **BUY_NO $30 /
+BUY_YES $15**; series caps **HIGH $15 / LOW $1** (each min'd with the side cap);
+`max_ticker_total_usd` $30; `daily_spend_cap_usd` $300; price ∈ [5, 90] ¢; no new
+buys < 30 min to close; 30 min rebuy cooldown; **daily-loss kill at −$100**;
+`max_open_positions` / `max_daily_buys` effectively unlimited; the API-spend breaker
+is disabled (∞). `check_sell` is intentionally weaker but moot while
+`ENABLE_SELLS=False`. The mode / kill-switch / enable flags short-circuit everything.
+
+---
+
+## Safety / mode flags (current live values)
+
+| Flag | Value | Meaning |
+|---|---|---|
+| `MODE` | `trader` | executes orders (`observer_only` = scan/log only; `killed` = nothing) |
+| `DRY_RUN` | `False` | real Kalshi POSTs |
+| `ENABLE_BUYS` | `True` | |
+| `ENABLE_SELLS` | `False` | bot holds to settlement; exit loop skipped |
+| `LLM_DISPATCH_MODE` | `off` | LLM never dispatched — push worker owns trades |
+| `SHADOW_NN_EVENT_DRIVEN` | `True` | the push worker is the trading engine |
+| `AUTO_EXECUTE_BUY_{NO,YES}_PUSH` | `True` | |
+| `KILL` file | `~/paper_judge_bot/KILL` | touch to halt new actions (open positions untouched) |
+| `WALLET` | `v2` | shared account-2 key (not dedicated) |
+
+---
+
+## Co-existence on the shared v2 wallet
+
+The v2 wallet is shared three ways: **V2-max** (`obs-pipeline-bot`, KXHIGH), **V2-min**
+(`kalshi-min-bot-v2`, KXLOWT), and **judge** (this bot, both). Collision rules in
+code: every cycle reads `/portfolio/positions` and skips any ticker already held by
+*any* bot; exits only ever touch judge-opened positions (origin tag +
+`state.claim_ticker`, which also keeps the sibling bots' orphan-reconcilers from
+adopting our tickers); caps are sized conservatively against the shared balance; one
+shared Kalshi rate-limit bucket. To give judge its own key/balance, set
+`WALLET="own"` + `.env` `KALSHI_KEY_ID`/`KALSHI_PEM_PATH`.
+
+---
+
+## Data sources (current)
+
+| Source | Module(s) | Notes |
+|---|---|---|
+| Kalshi REST + WS | `kalshi_client.py`, `kalshi_ws.py` | RSA-PSS-signed; WS BBO cache w/ inversion guard; PEM is the shared account-2 key `/home/ubuntu/obs-pipeline-bot/kalshi_key_v2_account2.pem` |
+| Analog trace DB | `nn_match_fast.py` | `/home/ubuntu/data/heating_traces.sqlite` (the matcher's training data) |
+| Live obs + running extreme | `wethr_rm.py`, `shared_cache_reader.py` | `/home/ubuntu/shared/wethr_cache.json` (wethr-cache-service, ~5 s) — **sole RM source** since the 2026-05-16 wethr-only policy |
+| NWP model cache | `shared_cache_reader.py`, `forecast_delta.py`, `nbp_reader.py` | `/home/ubuntu/shared_cache/{nbm,hrrr,ecmwf-ifs}.json` — feeds the **dormant** LLM packet; **not** used in the push decision |
+| Solar/clock, climate normals, station meta | `solar_calc.py`, `climate_normals.py`, `station_meta.py` | pure tables/astronomy (no network) |
+| Settlement | `kalshi_client.list_settlements` + `markets/{ticker}.result` | CLI-authoritative outcomes |
+| Notifications | `paper_judge_bot.discord_send` | Discord webhook or bot token |
+
+(The NWS modules `obs_client` / `nws_grid` / `nws_afd` / `nws_history` /
+`nws_fc_history`, plus `wethr_client` and `persistence`, feed the dormant LLM packet
+and the obs-primer — they are **not** on the push decision path.)
+
+---
+
+## File map
+
+```
+paper_judge_bot/
+├── README.md                  ← this file (current reference + change log)
+├── paper_judge_bot.py         ← daemon: Runtime, one_cycle, run_entry/exit_loop,
+│                                 execute_buy/sell, reconcile, prescreen (LLM-era)
+├── config.py                  ← ALL tunables + .env loader + wallet resolve
+│
+│  ── signal pipeline (the live brain) ──
+├── nn_shadow_worker.py        ← event-driven auto-trader (triggers, gate stack)
+├── nn_shadow.py               ← packet → predict() adapter (μ/σ)
+├── nn_match_fast.py           ← kNN analog matcher over heating_traces.sqlite
+├── nn_shadow_strategy.py      ← pure_nn_decide: P(YES), edge, side, sizing
+├── push_window_overrides.py   ← generated per-(station,side,month) window/bias/MAE table
+│
+│  ── execution / market IO ──
+├── kalshi_client.py           ← RSA-PSS REST: balance, markets, orders, settlements
+├── kalshi_ws.py               ← live BBO/orderbook WS + fill channel + inversion guard
+├── market_universe.py         ← ticker grammar, Candidate, daily universe discovery
+├── shared_cache_reader.py     ← reads wethr_cache.json + NWP shared_cache
+├── wethr_rm.py                ← running min/max + F1 LST climate-day staleness validator
+├── guardrails.py              ← deterministic hard caps (check_buy/check_sell)
+├── state.py                   ← positions/trades/decisions persistence + claim registry
+│
+│  ── data adapters (mostly feed the dormant LLM path / obs primer) ──
+├── obs_client.py, obs_refresh.py, wethr_client.py, live_data.py
+├── nws_grid.py, nws_afd.py, nws_history.py, nws_fc_history.py
+├── climate_normals.py, solar_calc.py, station_meta.py
+├── pres_history.py, forecast_delta.py, nbp_reader.py, persistence.py
+│
+│  ── dormant LLM ("Claude-as-Trader") path ──
+├── judgment.py                ← Claude SDK/CLI caller + prompt build + parser
+├── decide_entry_code.py       ← pure-code shadow comparator (logs only, never trades)
+├── prompts/                   ← entry_prompt.md / exit_prompt.md (+ backups)
+│
+├── tools/                     ← backtest/analysis utilities (NOT on the trade path)
+├── tests/                     ← 26 files / ~428 tests (pytest)
+├── data/                      ← runtime files (gitignored): positions.json,
+│                                 trades.jsonl, shadow_nn_strategy.jsonl, by_date/, …
+├── paper-judge-bot.service    ← systemd unit
+└── *.md                       ← BACKTEST_GUIDE / BACKTEST_METHODOLOGY / MAY20_SETUP /
+                                  GOODDAY_PREDICTOR_SCOPE / PHASE2_NWP_DISPERSION_SCOPE /
+                                  PUSH_OVERRIDES_PLAN
+```
+
+---
+
+## Operational runbook
+
+- **Host / service:** VPS `ubuntu@54.225.174.220`, `~/paper_judge_bot`, systemd
+  `paper-judge-bot.service`. Git-tracked (`judgebot.git`, branch `main`). SSH first —
+  local copies are stale.
+- **Logs:** `journalctl -u paper-judge-bot -f`; live decisions
+  `tail -F data/shadow_nn_strategy.jsonl`; fills `data/trades.jsonl`.
+- **Kill switch:** `touch ~/paper_judge_bot/KILL` halts new actions (open positions
+  are *not* closed); `rm` the file to resume.
+- **After any config/code change:** `sudo systemctl restart paper-judge-bot`, verify a
+  single PID with code mtime ≤ start, then **commit + push** to `judgebot.git`
+  (restart ≠ done).
+- **Forward tracking:** `tools/accumulate_cell_wr.py` (daily timer) appends
+  faithful settled-trade win-rate to `data/faithful_cell_wr.jsonl`;
+  `tools/replay_windows.py` + `window-replay.timer` replay the current windows on a
+  past day into `data/window_replay_log.txt`.
+- **Toggling behavior:** every lever is a flag in `config.py` (restart to apply) —
+  see the inline comments there for each flag's backtest provenance.
+
+---
+
+## Tools, tests, docs
+
+- **`tools/`** — research/backtest utilities, **not** part of the running bot: DB
+  audit + gap-fill (the capture-gap suite), candlestick backfill, HIGH/LOW window
+  sweeps that emit `PUSH_*_WINDOW*` dicts, spread analysis, the faithful WR
+  accumulator, and a standalone live price recorder. Authoritative data store:
+  `/home/ubuntu/data/market_history_backfill.sqlite`. **Read `BACKTEST_GUIDE.md`
+  first** for the backtest conventions (audit-first, asymmetric price gate,
+  faithful = buy-at-open, OOS early/late split).
+- **`tests/`** — 26 files, ~428 tests (`pytest tests/`): guardrails, F1 rm-validation
+  + LST climate-day math, push windows + every gate (tier-1, h₂peak, tail-bet,
+  thin-margin, cold-front), nn calibration, `pure_nn_decide`, market-universe
+  parsing, state bookkeeping, MAE sizing, regime-MAE. (A root-level
+  `test_nn_shadow_strategy.py` is a stale duplicate of the one in `tests/`.)
+- **Aux docs:** `BACKTEST_GUIDE.md`, `BACKTEST_METHODOLOGY.md`, `MAY20_SETUP.md`,
+  `GOODDAY_PREDICTOR_SCOPE.md`, `PHASE2_NWP_DISPERSION_SCOPE.md` (NWP dispersion —
+  later confirmed NO-GO), `PUSH_OVERRIDES_PLAN.md` (the override-system handoff doc).
+
+---
+
+## Legacy: the LLM "Claude-as-Trader" path (dormant)
+
+The original design dispatched each prescreened candidate to Claude
+(`judgment.judge_entry`, `prompts/entry_prompt.md`) for a BUY/SKIP read, with a
+matching Claude exit loop. That code is intact — `judgment.py`,
+`decide_entry_code.py` (a pure-code shadow comparator that only logs), the
+`prescreen` in `paper_judge_bot.py`, and `prompts/` — but **not executed**:
+`LLM_DISPATCH_MODE="off"` skips the entry loop, and `ENABLE_SELLS=False` skips
+exits. Even the entry prompt had forecasts disabled (`RENDER_FORECASTS=False`) before
+it was shut off, so its last live form saw obs + nn_match only. The full evolution
+from LLM-first to pure-code push is in the change log below.
+
+---
+
+# Change log (newest first)
+
+> Historical record. Current behavior is summarized in the reference above; where an
+> entry below conflicts with the reference, **the reference wins** (it reflects the
+> live `config.py`). Notable later reversals: median-bias correction was shipped then
+> reverted; the HIGH early-side trim is currently off.
 
 ## HIGH sizing tiers ($15 robust / $3 soft) + daily window-replay cron — 2026-05-23
 
@@ -2324,301 +2660,6 @@ pipeline docs). Backups `*.bak.pre_nn_live_20260517_030048`.
 
 ---
 
-## Why this bot exists
-
-The 4 numerical bots are excellent at the steady-state — they ingest
-NBP/NBM/HRRR/ECMWF, blend, calibrate, run a long stack of pipeline-invariant
-filters, and execute. They miss situations where:
-
-  - Live point obs reveal what the forecast cascade didn't (e.g., current
-    temp == running_min near settlement → "minimum is being made *now*",
-    not in the past — see the DC-26MAY13-B54.5 case)
-  - Wet-bulb / dewpoint analysis sets a different floor than model σ implies
-    (active rain + dewpt 53.6°F → cooling-to-wet-bulb is the real risk)
-  - Market spread/volume/recent-prints reveal trader conviction the bot
-    can't see (NO bid 27c with a 39c spread is a *signal*, not noise)
-  - Multiple weak signals compound into a "this looks wrong" gestalt that
-    no single rule-based filter can encode without overfitting
-
-A general-purpose reasoner can pull these threads together in real time,
-narrate its read, and act. That's this bot's edge.
-
-It is **not** trying to replicate or out-perform the 4 numerical bots'
-steady-state edge. It's after the situations they leave on the table.
-
----
-
-## Co-existence with the V2 max + V2 min bots
-
-The v2 Kalshi wallet is shared three ways:
-
-| Bot | Service | Series |
-|---|---|---|
-| V2 max | `obs-pipeline-bot.service` | KXHIGH* |
-| V2 min | `kalshi-min-bot-v2.service` | KXLOWT* |
-| **judge** | `paper-judge-bot.service` (this) | both |
-
-Without rules, three bots fighting for the same balance + double-buying the
-same ticker would be a mess. The rules enforced in code:
-
-1. **Entry loop calls `/portfolio/positions` every cycle.** Any ticker
-   with `position != 0` on the wallet is silently skipped — `paper-judge`
-   refuses to enter where V2 max or V2 min already has size.
-
-2. **Exit loop only acts on positions we opened.** Each entry row gets
-   `opened_by: "paper-judge"`. The exit loop short-circuits on any
-   position without that tag. So we never accidentally sell V2 max's
-   position out from under it.
-
-3. **Wallet balance is shared.** The bot's daily / per-ticker / per-trade
-   caps still apply, but the wallet's actual cash is finite across all
-   three bots. Set `DAILY_SPEND_CAP_USD` conservatively (default $200)
-   relative to wallet balance.
-
-4. **Rate limit bucket is shared.** Kalshi rate-limits per API key; we
-   share with the other two v2 bots. The entry loop's cadence (60s
-   default) is loose enough to coexist.
-
-If you ever want to give `paper-judge` its own dedicated key + balance,
-flip `WALLET = "own"` and set `KALSHI_KEY_ID` + `KALSHI_PEM_PATH` in `.env`.
-
-## Architecture
-
-```
-                       ┌──────────────────────────────────┐
-                       │     paper_judge_bot daemon        │
-                       │                                   │
-   ┌─── shared S3 ─────┤   ENTRY LOOP (every 60s):         │
-   │   cache reader    │     1. scan Kalshi LOW+HIGH       │
-   │  (nbm/hrrr/       │        markets matching universe  │
-   │   ecmwf-ifs.json) │     2. numerical pre-screen       │
-   │                   │     3. fetch live obs (NWS)       │
-   ├─── NWS obs API ───┤     4. build entry prompt         │
-   │   (cached 60s)    │     5. Claude.judge_entry()       │
-   │                   │     6. parse, validate, size      │
-   ├─── Kalshi REST ───┤     7. guardrails check           │
-   │   + WS BBO        │     8. execute or reject          │
-   │                   │                                   │
-   ├─── obs sqlite ────┤   EXIT LOOP (every 30s):          │
-   │   (running_min)   │     for each open position:       │
-   │                   │       a. compute MTM, time-left   │
-   ├─── bot_decisions ─┤       b. trigger predicates       │
-   │   .sqlite (audit) │       c. if triggered: Claude     │
-   │                   │          .judge_exit()            │
-   ├── Anthropic API ──┤       d. execute sell or hold     │
-   │   (Claude         │                                   │
-   │    Sonnet 4.6,    │   GUARDRAILS (always):            │
-   │    prompt cached) │     - daily $ spend cap           │
-   │                   │     - per-ticker size cap         │
-   │                   │     - max open positions          │
-   │                   │     - no-trade window pre-close   │
-   │                   │     - circuit breaker on -$X day  │
-   │                   │                                   │
-   └─── Discord ───────┤   AUDIT every cycle:              │
-       webhook         │     decisions.jsonl + sqlite      │
-                       └──────────────────────────────────┘
-```
-
-All long-running connections (Kalshi WS, sqlite) live in the same process.
-Each loop's body is idempotent so a crash + restart never double-orders.
-
----
-
-## Decision loop in detail
-
-### ENTRY (one pass per cycle, default 60s)
-
-1. **Universe scan.** Pull all open Kalshi tickers matching `KXHIGH*-26*-B*` /
-   `KXHIGH*-26*-T*` / `KXLOW*-26*-B*` / `KXLOW*-26*-T*` for stations in
-   `STATIONS` and dates in {today, tomorrow, day-after}. (Universe is
-   configurable; default includes all 20 cities both bots already trade.)
-
-2. **Numerical pre-screen.** Reject candidates that clearly don't deserve
-   an LLM call:
-   - Spread > `MAX_SPREAD_CENTS` (default 25¢) — too illiquid to act on
-   - Both yes_ask and no_ask < `MIN_PRICE_FRAC` (default 0.05) or
-     > `MAX_PRICE_FRAC` (0.95) — already crushed
-   - Time-to-close < `MIN_TIME_TO_CLOSE_MIN` (default 30 min) — no
-     room to be wrong
-   - Existing position on this ticker — defer to EXIT loop
-
-   This is cost control, not edge. A pre-screen reject is logged but
-   never causes a missed entry that the prompt would have caught.
-
-3. **Live data assembly.** For each surviving candidate, gather in parallel:
-   - Current NWS obs at the station: temp, dewpt, sky, wind, ts
-   - Last ~6 obs (30 min trailing) for trend direction
-   - Latest NBM + HRRR forecast for the climate day from shared cache
-   - Running_min/max from obs-pipeline sqlite
-   - Kalshi BBO from WS cache (yes_bid/ask, no_bid/ask, spread, volume,
-     last 5 prints if available)
-   - Climate-day-close UTC time + minutes remaining
-
-4. **Prompt build + Claude call.** See `prompts/entry_prompt.md`. The
-   static portion (RULE #2 from CLAUDE.md, recent settlement summary,
-   per-station idiosyncrasies, output schema) is sent with
-   `cache_control: ephemeral` so the first call of the cycle warms the
-   cache and subsequent candidates hit it. ~10K input tokens cached,
-   ~1.5K dynamic per candidate, ~800 output tokens. With Sonnet 4.6
-   pricing that's ~$0.012 per entry decision after warmup.
-
-5. **Response parse + validate.** Claude returns strict JSON:
-   ```json
-   {
-     "decision": "BUY_NO" | "BUY_YES" | "SKIP",
-     "conviction": 0.0 - 1.0,
-     "size_factor": 0.0 - 1.0,
-     "read": "...one paragraph...",
-     "key_risks": ["...", "..."],
-     "what_would_change_my_mind": "..."
-   }
-   ```
-   Schema mismatches → forced SKIP. Unknown decisions → forced SKIP.
-   `size_factor` is multiplied by `MAX_BET_USD` to size the bet.
-
-6. **Guardrails check** (see "Safety" below).
-
-7. **Execute** via `kalshi_client.place_order()`. Log to decisions.jsonl,
-   bot_decisions.sqlite, and Discord.
-
-### EXIT (one pass per cycle, default 30s)
-
-For each open position:
-
-1. **Compute live state**: MTM%, time-to-close, current_rm vs bracket,
-   live market BBO, recent prints.
-
-2. **Trigger predicates** — only call Claude if at least one fires
-   (saves cost, focuses LLM on situations the bot's snapshot view
-   may be wrong about):
-   - `mtm_swing`: |current_mtm - peak_mtm| > 30%
-   - `rm_near_boundary`: running_min within 1.5°F of cap (BUY_NO) or floor (BUY_YES)
-   - `time_to_close`: <90 min remaining AND position size > $20
-   - `spread_widening`: spread doubled vs entry
-   - `obs_anomaly`: current temp equals running_min AND time-to-close < 3h
-     (the DC pattern — minimum is being made now)
-
-3. **Live data assembly** — same as entry but tailored to exit context.
-
-4. **Claude call.** Returns:
-   ```json
-   {
-     "decision": "HOLD" | "SELL_ALL" | "SELL_PARTIAL",
-     "sell_count": int,
-     "limit_price_cents": int,
-     "conviction": 0.0 - 1.0,
-     "read": "...",
-     "regret_check": "if this turns out wrong, what's the most likely reason?"
-   }
-   ```
-
-5. **Guardrails check** (sell-side has weaker guardrails — selling is
-   generally safer than buying).
-
-6. **Execute** via `kalshi_client.place_sell()`.
-
----
-
-## Safety
-
-Multi-layer. The LLM is the *least*-trusted component; everything else is
-deterministic.
-
-### Layer 1: Mode flags (set in `config.py`, runtime-flippable)
-
-| Flag | Default | Effect |
-|---|---|---|
-| `MODE` | `"observer_only"` | observer_only \| trader \| killed |
-| `DRY_RUN` | `True` | If True, log orders but never call Kalshi |
-| `ENABLE_BUYS` | `True` | If False, only sells allowed |
-| `ENABLE_SELLS` | `True` | Should rarely be False (emergency exits) |
-| `KILL_SWITCH_FILE` | `~/paper_judge_bot/KILL` | If file exists, bot won't take any action this cycle |
-
-**`observer_only` is the default.** First week of operation: bot scans,
-analyzes, posts decisions to Discord. No orders. Chris validates Claude's
-calls against settled outcomes. Flip to `trader` only after vetting.
-
-### Layer 2: Budget + sizing hard caps (`guardrails.py` + balance clamp)
-
-| Cap | Default | Notes |
-|---|---|---|
-| `max_bet_usd` | $15 | Per single buy order. Final `count` is clamped by both this cap AND the live wallet (see below). |
-| `max_ticker_total_usd` | $20 | Cumulative cost across all addons on one ticker |
-| `daily_spend_cap_usd` | $300 | Resets at UTC midnight |
-| `max_open_positions` | 999 | Effectively unlimited per user request |
-| `min_price_cents` | 5 | Don't buy below 5c (no Kelly value, fee-dominated) |
-| `max_price_cents` | 90 | Don't buy above 90c (10c upside, asymmetric loss) |
-
-Any candidate buy that would violate these is rejected pre-execute with
-a logged reason. No LLM override.
-
-**Balance-aware sizing (added 2026-05-15)** — the V2 wallet is shared with
-V2 max + V2 min. `execute_buy()` now refreshes the cached Kalshi balance
-before every order (`kalshi_client.get_balance_cached()`, 15s TTL) and caps
-`count` to the largest size the wallet can afford:
-
-```
-max_affordable = floor(balance_cents / ask_cents)
-final_count    = min(intended_count, max_affordable)
-```
-
-If `max_affordable < 1` (wallet can't cover even one contract at the ask),
-the candidate is **skipped + Discord-notified** rather than POSTed to
-Kalshi. If a sibling bot eats the cash between our `get_balance` and
-`POST /orders` (race → 400 `insufficient_balance`), the balance cache is
-invalidated, refreshed, and the order retried once with the new clamp.
-After every successful buy the cache is invalidated so the next candidate
-in the same cycle sees the post-debit wallet.
-
-**Discord on every attempt (added 2026-05-15)** — `execute_buy()` now
-posts a Discord notification for **every** outcome of every buy attempt:
-
-| Emoji | Meaning |
-|---|---|
-| 🎯 ATTEMPT | About to submit order — includes count, price, wallet, conv, size |
-| ⛔ SKIP | Pre-submit reject: wallet < ask, no balance yet |
-| ⛔ REJECTED | Guardrail (price band, daily cap, ticker cap, etc.) |
-| ♻️ RETRY | First attempt hit insufficient_balance; retrying with new clamp |
-| ❌ FAILED | Submission rejected (with Kalshi error code/message) |
-| ⚠️ NOT FILLED | Order accepted but didn't execute → cancelled |
-| ✅ filled | Position opened — existing success notification |
-
-This replaces the previous behavior where failed buys were silently logged
-to journald only, leaving Chris blind to e.g. an insufficient_balance run.
-
-### Layer 3: Time-window guards
-
-  - **No new buys < 30 min before climate-day close** — bot's edge is in
-    early-cycle judgment, not last-second scrambles. The market has
-    digested everything by then.
-  - **No sells > 6h before close UNLESS triggered by an obs anomaly** — selling
-    early forfeits the bot's hold-to-settlement edge (RULE #2).
-  - **Cooldown** after a sell on a ticker: 30 min before any re-entry on
-    same ticker. Prevents Claude oscillation.
-
-### Layer 4: Circuit breaker
-
-  - **Daily realized P&L < -$100**: bot enters `MODE=killed` automatically;
-    sends Discord alarm. Only Chris can flip back to `trader`.
-  - **3 consecutive Claude calls return parse errors / timeouts**: pause
-    new entries for 5 min. After 15 min of failures, switch to
-    `observer_only`.
-  - **Anthropic API spend tracking**: if today's spend > `MAX_API_SPEND_USD`
-    (default $5), pause LLM calls and fall back to "hold all positions,
-    no new entries."
-
-### Layer 5: Decision logging
-
-Every Claude call (including SKIPs and parse failures) is logged to:
-  - `data/decisions.jsonl` — full request+response with timestamps
-  - `bot_decisions.sqlite` — joined with other 4 bots' decisions for
-    cross-comparison
-
-If a position later loses, the audit trail shows exactly what Claude saw
-and said. This is the dataset for tuning the prompt over time.
-
----
-
 ## Token-saving changes — 2026-05-15
 
 Following high HOLD rate on exit Claude calls (246/250 = 98%) and high SKIP rate on entry calls (838/1023 = 82%), the bot was tightened to spend tokens only where they have edge:
@@ -2788,203 +2829,3 @@ stays-below-past-peak/past-min). Backup `config.py.bak.pre_tighten_gap_mktconf_2
 
 Tests: 191 pass + 2 F2 skipped. Test-data updates required (base packets
 needed to produce edge ≥ 6pp AND ≤ 25pp AND dom-ask ≥ 60c simultaneously).
-
-## Data sources
-
-| Source | Module | Notes |
-|---|---|---|
-| Kalshi markets/positions/orders | `kalshi_client.py` | RSA-PSS signed REST + WS BBO cache. Auth via PEM at `~/paper_judge_bot/kalshi_key.pem`. Wallet configurable. |
-| NWS live obs | `obs_client.py` | `api.weather.gov/stations/{ID}/observations/latest`. Cached 60s per station to avoid rate-limiting (limit 5 req/sec). Falls back to MADIS via obs-pipeline sqlite if NWS is down. |
-| Forecast cache | `shared_cache_reader.py` | Reads `/home/ubuntu/shared_cache/{nbm,hrrr,ecmwf-ifs}.json`. Same merge logic as min/max bots. |
-| Running min/max | obs-pipeline sqlite | Read-only. Same path as min bot uses. |
-| Claude (LLM) | `judgment.py` | Two backends: `claude_cli` (uses subscription via `claude -p`, default) or `anthropic_sdk` (uses `ANTHROPIC_API_KEY`, prompt-cached). |
-| Audit | `bot_decisions.sqlite` | Via `shared_tools/decision_log.record()`. Bot name `paper-judge`. |
-| Notifications | `discord.py` (stdlib + webhook) | Channel configurable per env. |
-
----
-
-## Operational runbook
-
-### First-time deploy (DRY_RUN observer mode)
-
-```bash
-# 1. SCP the directory
-scp -i ~/.ssh/kalshi-bot-key -r paper_judge_bot ubuntu@54.225.174.220:~/
-
-# 2. Configure
-ssh -i ~/.ssh/kalshi-bot-key ubuntu@54.225.174.220
-cd ~/paper_judge_bot
-cp .env.example .env
-$EDITOR .env  # set ANTHROPIC_API_KEY, KALSHI_KEY_ID, DISCORD_WEBHOOK_URL
-
-# 3. Install systemd unit (does NOT start the service)
-sudo cp paper-judge-bot.service /etc/systemd/system/
-sudo systemctl daemon-reload
-
-# 4. Run a one-shot dry-run cycle to test plumbing
-python3.12 -m paper_judge_bot --once
-
-# 5. Start as a service
-sudo systemctl enable --now paper-judge-bot.service
-
-# 6. Watch logs
-journalctl -u paper-judge-bot -f
-```
-
-The bot starts in `observer_only` mode by default. Decisions go to Discord
-+ `decisions.jsonl` but no orders are placed.
-
-### Promoting to trader
-
-After ≥7 days in observer_only:
-
-```bash
-# Edit config
-$EDITOR ~/paper_judge_bot/config.py  # set MODE = "trader", DRY_RUN = False
-
-# Restart
-sudo systemctl restart paper-judge-bot.service
-```
-
-Verify per RULE #3c snippet (see CLAUDE.md): single PID, code mtime ≤ start.
-
-### Kill switch
-
-```bash
-# Immediate halt (no new actions until file is removed)
-touch ~/paper_judge_bot/KILL
-
-# Resume
-rm ~/paper_judge_bot/KILL
-```
-
-The bot checks for this file every cycle. Existing open positions are *not*
-closed — kill switch only stops new actions.
-
-### Monitoring
-
-  - **Discord**: every entry, sell, and SKIP-with-conviction>0.6 posts a one-liner.
-  - **journalctl -u paper-judge-bot**: full stdout/stderr.
-  - **`tail -F data/decisions.jsonl`**: raw decision stream.
-  - **`tail -F data/trades.jsonl`**: filled entries/exits only.
-  - **Weather dashboard**: planned integration (see "Backlog").
-
-### Daily reconciliation
-
-`tools/judge_daily_summary.py` (planned) reports:
-  - Entries today / sells today / P&L
-  - Win rate vs. Claude's stated conviction (calibration)
-  - Top 3 best calls + top 3 worst calls
-  - Claude API spend vs. realized P&L
-
----
-
-## Prompt design notes
-
-See `prompts/entry_prompt.md` and `prompts/exit_prompt.md` for the actual
-templates.
-
-The static portion of each prompt is ~10K tokens covering:
-  - Bot's role + objective (one paragraph)
-  - RULE #2 from CLAUDE.md (market-is-right doctrine) — non-negotiable
-  - Recent settlement context (last 7 days' P&L by station)
-  - Per-station idiosyncrasies (heat-island bias, dewpoint floors, etc.)
-  - Output JSON schema with examples
-  - Few-shot exemplars (2-3 hand-picked good decisions + 1 SKIP)
-
-This block is sent with `cache_control: {"type": "ephemeral"}` so it costs
-the full ~10K only on the first call of a cache window (5 min TTL).
-Subsequent calls cost ~1.5K input + ~800 output.
-
-The dynamic portion (~1.5K tokens) per candidate is purely the situation:
-position state, live obs, forecast snapshot, market BBO, climate timing.
-
-### What the prompt does NOT include
-
-  - Long bot logs / source code (use for debugging via separate Claude Code
-    sessions, not in trading prompts)
-  - Per-trade backtest results (would bias toward overfitting to recent pool)
-  - Other bots' recent decisions (would create herding, defeats the
-    independence-of-judgment edge)
-
----
-
-## Sample decision (manual reconstruction of the DC case)
-
-**Situation packet sent to Claude:**
-
-```
-TICKER: KXLOWTDC-26MAY13-B54.5
-BRACKET: LOW in [54, 55) for KDCA on climate-day 2026-05-13
-TIME: 2026-05-14T02:35:00Z (2h 25m to climate-day close at 05:00 UTC)
-POSITION: BUY_NO 103 @ $0.58 = $59.74 cost (2× MAX_BET_USD — already loaded)
-LIVE MTM: -53% (bid 27c, ask 66c, spread 39c — wide)
-RUNNING_MIN: 57.2°F (set at morning dawn ~10:30 UTC)
-LIVE OBS (KDCA 02:35Z): temp 57.2°F, dewpt 53.6°F, rain+fog, wind 29mph
-RECENT TREND: temp held 57.2-58.5°F since 22:00Z; not dropping yet
-FORECAST: NBM tonight low 55.5°F, HRRR 57.6°F, model_prob (current) 0.19
-MARKET: yes_ask 73c, no_ask 66c; recent prints (last hr): 0.49, 0.51, 0.47
-```
-
-**Claude response (target shape):**
-
-```json
-{
-  "decision": "HOLD",
-  "sell_count": 0,
-  "limit_price_cents": null,
-  "conviction": 0.62,
-  "read": "Running_min is 57.2°F but current temp is also 57.2°F — the minimum is being made right now, not in the past. Wet-bulb floor with dewpt 53.6°F is ~55°F, exactly at cap. Active rain + 29mph wind currently mixes the boundary layer (suppressing radiative cooling), so the wet-bulb-route isn't engaging yet. Market priced fairly (~50% NO via midpoint) given this. Bot's 80% NO conviction is overconfident. However selling at 27c locks in -53% and the position is already past the point where the bot would have skipped on a 2.2°F margin. Hold and accept the bet.",
-  "regret_check": "If a cold front passes in the next 90 min and clears the rain, radiative cooling could drop temp to ~54°F. That's the most likely path to a loss. If I see temp drop below 56°F before 04:00Z I'd revisit selling at then-current bid."
-}
-```
-
-This is *not* a "sell now" recommendation — but it's a high-quality read of
-the situation, and it'd surface the regret_check trigger to the next cycle.
-
----
-
-## Implementation backlog (post-MVP)
-
-  - Per-station prompt context blocks (e.g., KAUS heat-island, KLAX coastal
-    layer dewpoint floor)
-  - NWS Area Forecast Discussion ingestion for frontal/synoptic context
-  - Calibration audit: track Claude's stated conviction vs. realized outcome
-    over 100 decisions, surface calibration curve
-  - Whisper-mode: Claude can suggest a position size change on an open
-    position without selling (i.e., add to a winner). Off by default.
-  - Cross-bot decision joins: query `bot_decisions.sqlite` for what the
-    other 4 bots decided on the same ticker, include in prompt context.
-  - Shared Kalshi client module (refactor across all 5 bots).
-
----
-
-## Files in this directory
-
-```
-paper_judge_bot/
-├── README.md                 ← this file
-├── paper_judge_bot.py        ← main daemon
-├── config.py                 ← all tunables + env loading
-├── guardrails.py             ← hard safety rules (LLM-bypassed)
-├── judgment.py               ← Claude API + prompt builders + parser
-├── kalshi_client.py          ← auth, REST, order placement
-├── shared_cache_reader.py    ← reads /home/ubuntu/shared_cache/
-├── obs_client.py             ← NWS live obs with caching + MADIS fallback
-├── market_universe.py        ← ticker discovery + filtering
-├── state.py                  ← positions, orders, decisions persistence
-├── .env.example              ← env var template
-├── paper-judge-bot.service   ← systemd unit
-├── prompts/
-│   ├── entry_prompt.md       ← static + dynamic template for entries
-│   └── exit_prompt.md        ← static + dynamic template for exits
-├── tests/
-│   ├── test_guardrails.py
-│   ├── test_judgment_parser.py
-│   ├── test_state.py
-│   └── test_market_universe.py
-└── data/                     ← runtime files (gitignored)
-    ├── positions.json
-    ├── trades.jsonl
-    └── decisions.jsonl
-```

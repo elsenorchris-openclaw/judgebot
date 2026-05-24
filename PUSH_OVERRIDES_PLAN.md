@@ -1,7 +1,9 @@
 # Push Window Overrides — Implementation Plan & Data Reference
 
 **Living handoff doc for the push pure-nn override system in paper_judge_bot.**
-Any session picking this up: read this first. Last updated 2026-05-21.
+Any session picking this up: read this first. Last updated 2026-05-21
+(status patched 2026-05-23: HIGH early-trim is now OFF; the override-table windows
+are superseded by per-station temp windows in May — see §0).
 
 Bot lives on VPS `ubuntu@54.225.174.220:/home/ubuntu/paper_judge_bot/` (repo
 `github.com/elsenorchris-openclaw/judgebot.git`, branch `main`). SSH first —
@@ -15,12 +17,12 @@ local copies are stale (CLAUDE.md RULE #0.7).
 |---|---|
 | 18-dim conditional-MAE backtest (v3) | ✅ done (2000-2025, 3.17M rows) |
 | `push_window_overrides.py` — 480/480 windows + bias + mae | ✅ SHIPPED `cc11a38` + `6aa2f51` |
-| Windows live in bot | ✅ (`_in_decision_window` reads `ov[0]/ov[1]`) |
+| Windows live in bot | ✅ (`_in_decision_window` reads `ov[0]/ov[1]`) — **⚠️ NOTE (2026-05-22+):** in months ∈ `config.PUSH_TEMP_WINDOW_MONTHS` (currently `{5}`=May) the table window is SUPERSEDED by the per-station `PUSH_HIGH_TEMP_WINDOW_BY_STATION` / `PUSH_LOW_TEMP_WINDOW`; the table drives windows only OUTSIDE those months. The `mae` field is still used for sizing every month. |
 | Out-of-sample validation of bias + MAE | ✅ done 2026-05-21 (see §4a) |
 | ~~MEDIAN-bias applied to μ~~ | ⛔ REVERTED 2026-05-21 — flipped 2 MSP winners→losses on 5/20 (Kalshi-settled 16-6→14-8). `USE_PUSH_BIAS_CORRECTION=False`; bias still logged, not applied. |
 | **MAE-based confidence sizing (cell-level)** | ✅ SHIPPED `USE_PUSH_MAE_SIZING` |
 | **GLOBAL regime-MAE adjustment (anomaly/sigma/sky/wind/tspeak)** | ✅ SHIPPED 2026-05-21 `USE_PUSH_REGIME_MAE_ADJ` — sizing-only. **Per-side (HIGH/LOW) deltas @ `PUSH_REGIME_MAE_DAMP=1.0`** (HIGH/LOW respond oppositely; hot-anomaly HIGH −0.25 / LOW +1.46). corr 0.167→0.229(pooled)→0.250(per-side). Deltas in `data/regime_mae_deltas.json` (gitignored, per-side `{high|low:{dim:{bucket}}}`). |
-| **HIGH early-side window trim (accurate-but-wide cells)** | ✅ SHIPPED 2026-05-21 `PUSH_EARLY_TRIM_HIGH_ENABLED` — caps `before`→1.0 on the 40 HIGH cells with mae<1.6 AND before>1.0. Windows are MAE-built but accuracy≠PnL: early offsets mis-call the bracket. **2024-2025 holdout (n=12,548): offset<-1.25 → wrong bracket 60% / ≥2F miss 32% vs 46%/16% near peak; 38/40 cells worse early.** Live PnL (n=52) agreed (+$18.58→+$65.51). `after`/peak/inaccurate-wide/LOW untouched. Applied in `_in_decision_window`, not the table → survives regen. |
+| **HIGH early-side window trim (accurate-but-wide cells)** | ⚠️ SHIPPED 2026-05-21, **then DISABLED 2026-05-22 (`PUSH_EARLY_TRIM_HIGH_ENABLED=False`)** — turned off because the deep-pre-peak `PUSH_HIGH_TEMP_WINDOW` (before=3.0) would be capped by the trim; logic is intact and flag-reversible. Original mechanism: caps `before`→1.0 on the 40 HIGH cells with mae<1.6 AND before>1.0. Windows are MAE-built but accuracy≠PnL: early offsets mis-call the bracket. **2024-2025 holdout (n=12,548): offset<-1.25 → wrong bracket 60% / ≥2F miss 32% vs 46%/16% near peak; 38/40 cells worse early.** Live PnL (n=52) agreed (+$18.58→+$65.51). `after`/peak/inaccurate-wide/LOW untouched. Applied in `_in_decision_window`, not the table → survives regen. |
 | **Empirical tail-loss correction (T brackets)** | ✅ SHIPPED 2026-05-23 `103270a` `USE_TAIL_EMPIRICAL_PYES=True`. Raises P(YES) of the fat-surprise tail (HIGH hot / LOW cold) on open-ended T brackets to the empirical floor (`_emp_tail_p` in `nn_shadow_strategy.py`); deflates overconfident deep-margin tail BUY_NO below the 12pp gate. Interior B untouched. See §12. |
 | MIA-class interior over-projection fixes | ⛔ ALL REJECTED 2026-05-22/23 — see §12. Forecast-divergence clamp, boundary-fragility/σ haircut, global two-piece σ-recal. MIA 5/21 is irreducible variance. |
 | MEAN-bias application | ⛔ REJECTED (−8.6% holdout — never ship) |
