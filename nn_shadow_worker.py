@@ -694,7 +694,12 @@ def _in_decision_window(station: str, series: str, local_hour: float,
     # Reversible via config.PUSH_HIGH_TEMP_WINDOW=None. Superseded by per-(station,
     # month) regen once the full historical backfill lands.
     _temp_win = getattr(_cfg, "PUSH_HIGH_TEMP_WINDOW", None)
-    if series == "HIGH" and _temp_win and month in getattr(_cfg, "PUSH_TEMP_WINDOW_MONTHS", {5}):
+    # 2026-05-24: per-station month override (KMDW/KBOS use their price window in Mar+Apr
+    # too -- their MAE override windows open near/post-peak and lose in the live era).
+    # Station absent -> global PUSH_TEMP_WINDOW_MONTHS. Reversible: empty the by-station dict.
+    _tw_months = (getattr(_cfg, "PUSH_TEMP_WINDOW_MONTHS_BY_STATION", {}) or {}).get(
+        station, getattr(_cfg, "PUSH_TEMP_WINDOW_MONTHS", {5}))
+    if series == "HIGH" and _temp_win and month in _tw_months:
         # 2026-05-22: per-station HIGH window (price-gated backtest, v1).
         # Looked up first; station absent -> global temp window above.
         # Reversible by clearing PUSH_HIGH_TEMP_WINDOW_BY_STATION.

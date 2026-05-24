@@ -507,6 +507,18 @@ PUSH_HIGH_MAX_BET_BY_STATION = {
 }
 PUSH_HIGH_NO_BET_BY_STATION = {}  # 2026-05-22 (Chris): removed the $30 MIA-NO carve-out — uniform $15 max for all HIGH now (PUSH_HIGH_MAX_BET_DEFAULT). NO-resize code in nn_shadow_worker stays but is dormant while empty; re-add {station: usd} to size a NO cell up.
 
+# 2026-05-24 (Chris): per-station LOW BUY_NO size-up. Deep-dive found pooled LOW
+# loses because the matcher's sigma is ~2.75x too small (RMSz 2.69) -> fake NO
+# edges; sigma-inflation BACKFIRES (shorts every narrow bracket). The exception
+# is the deep-history stations where the matcher IS calibrated: NYC (RMSz 1.45)
+# and DEN (RMSz 1.30, ~= HIGH's 1.32). There, faithful gated BUY_NO is positive
+# in BOTH date halves on B brackets (NYC +8.0/+7.7c n=45, DEN +4.3/+16.1c n=30;
+# T-tail brackets are NOT validated, n=6). So size up ONLY the validated subset:
+# {station} BUY_NO on B brackets -> this cap; everything else (LOW YES, T tails,
+# all other stations) stays at GUARDRAILS.max_bet_low_series_usd ($1). Applied in
+# low_post_probe.place() (LOW posts at MID, doesn't cross). Empty {} = uniform $1.
+PUSH_LOW_NO_BET_BY_STATION = {"KDEN": 10.0}  # 2026-05-24 (Claude review): KNYC HELD -- independent faithful backtest shows NYC LOW-NO early-half NEGATIVE (-7.5c; net +8c but not robustly both-halves on my split). DEN robust both halves (+32.7/+25.6c). Re-add "KNYC": 10.0 after reconciling methodology (NO-only? RMSz).
+
 # 2026-05-21: the push decision window comes SOLELY from the per-(station,
 # series, month) window table in push_window_overrides.PUSH_WINDOW_OVERRIDES.
 # There is NO default-window fallback -- it was removed to eliminate a confusing
@@ -603,6 +615,19 @@ PUSH_HIGH_TEMP_WINDOW_BY_STATION = {
 # Reversible: set PUSH_LOW_TEMP_WINDOW=None to revert all LOW to the overrides.
 PUSH_LOW_TEMP_WINDOW = (2.5, -2.0)   # 2026-05-23: 30-min deep-pre-min [min-2.5,min-2.0], BEGINS at min-2.5h = the offset curve LEAST-BAD LOW zone (-4.3c vs -15c near/post-min, which the old (0.5,1.5) targeted -- the worst). Still -EV crossing; $1 probe tests live exec. (Supersedes the near/post-min note above.)
 PUSH_TEMP_WINDOW_MONTHS = {5}   # 2026-05-22: months the per-station temp windows are active (May = profit-optimized). Other months fall to the month-keyed PUSH_WINDOW_OVERRIDES table.
+# 2026-05-24: per-station month override for the HIGH price window. A station listed
+# here uses its PUSH_HIGH_TEMP_WINDOW_BY_STATION price window in THESE months instead of
+# the global PUSH_TEMP_WINDOW_MONTHS. Added KMDW/KBOS for Mar+Apr: their month-keyed
+# MAE override windows open near/after peak (KMDW peak+0.5/-0.5, KBOS peak-2.5/-3.0 wide)
+# and LOSE in the live era (faithful Mar15-Apr: KMDW -5.0c/bet NOwin36%, KBOS -5.0c/bet
+# NOwin44%). Their deep price windows (KMDW peak-1.0, KBOS peak-1.5) flip both to ROBUST
+# (+14.6c/+8.1c per bet, both OOS halves +). Head-to-head delta +561c/+279c. LAX EXCLUDED
+# (its MAE window already wins +10c robust; price window slightly worse). Reversible:
+# empty this dict -> all stations revert to the global PUSH_TEMP_WINDOW_MONTHS.
+PUSH_TEMP_WINDOW_MONTHS_BY_STATION = {
+    # 2026-05-24 (Claude review): KMDW HELD -- independent faithful backtest Mar-Apr price-window -26c/bet (2W/13L); re-add "KMDW": {3,4,5} after reconciling (NO-only?). KBOS confirmed Mar-Apr +23.9c.
+    "KBOS": {3, 4, 5},
+}
 PUSH_LOW_TEMP_WINDOW_BY_STATION = {}
 
 # 2026-05-21: per-cell MEDIAN bias correction (HIGH only) + MAE-based confidence

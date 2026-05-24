@@ -101,7 +101,15 @@ def place(rt, cand, packet: dict, entry_dec, side: str,
     balance_usd = kalshi_client.get_balance_cached()
     if balance_usd is None:
         return False, "low_post_no_balance"
-    side_cap = float(config.GUARDRAILS.get("max_bet_low_series_usd", 1.0))
+    base_low_cap = float(config.GUARDRAILS.get("max_bet_low_series_usd", 1.0))
+    side_cap = base_low_cap
+    # 2026-05-24 (Chris): size up the VALIDATED LOW edge only -- NYC/DEN BUY_NO on
+    # B brackets (calibrated deep-history stations, both-halves-positive; see
+    # config.PUSH_LOW_NO_BET_BY_STATION). LOW YES, T tails, and all other stations
+    # stay at the $1 base cap.
+    if side == "no" and getattr(cand, "bracket_kind", "") == "B":
+        side_cap = float(getattr(config, "PUSH_LOW_NO_BET_BY_STATION", {}).get(
+            cand.station, base_low_cap))
     cnt = max(1, int(side_cap / (post_c / 100.0)))
     max_aff = int(balance_usd / (post_c / 100.0))
     if max_aff < 1:
@@ -109,10 +117,16 @@ def place(rt, cand, packet: dict, entry_dec, side: str,
     cnt = min(cnt, max_aff)
     cost = cnt * (post_c / 100.0)
 
+    # Guardrails enforces max_bet_low_series_usd as the LOW ceiling; when this cell
+    # is sized above the base cap, hand check_buy a per-call override so it honors
+    # the same number (still bounded by the absolute max_bet_no_usd $30 side cap).
+    _gr = config.GUARDRAILS
+    if side_cap > base_low_cap:
+        _gr = {**config.GUARDRAILS, "max_bet_low_series_usd": side_cap}
     bd = guardrails.BuyDecision(
         ticker=cand.ticker, side=side, count=cnt, price_cents=post_c,
         cost_usd=cost, seconds_to_close=packet.get("seconds_to_close") or 0)
-    ok, reason = guardrails.check_buy(rt.ctx, bd, config.GUARDRAILS)
+    ok, reason = guardrails.check_buy(rt.ctx, bd, _gr)
     if not ok:
         return False, f"low_post_guardrail:{reason[:40]}"
 
