@@ -1202,6 +1202,20 @@ def _build_shadow_packet(cand: market_universe.Candidate) -> Optional[dict]:
     # for nn_shadow's temp_history augmentation).
     temp_hist = shared_cache_reader.get_temp_history(cand.station, lookback_sec=3600.0)
     hourly_obs_today = wethr.get("hourly_obs_today") or []
+    # 2026-05-24: wethr_cache_service writes the hourly curve as "hourly_history",
+    # not "hourly_obs_today" (a dead key no producer fills). Without it the matcher
+    # runs only on the 60-min temp_history and sits on its >=12-bin trajectory gate,
+    # so sparser-feed stations chronically/intermittently no-fire (KNYC always;
+    # KBOS/KDCA/KSEA intermittent). Map hourly_history -> the shape nn_shadow.py
+    # expects: {hour_utc_iso, temp_f, dewpt_f}.
+    if not hourly_obs_today:
+        _hh = wethr.get("hourly_history") or []
+        hourly_obs_today = [
+            {"hour_utc_iso": _h.get("hour_iso"), "temp_f": _h.get("temp_f"),
+             "dewpt_f": _h.get("dew_point_f")}
+            for _h in _hh
+            if _h.get("temp_f") is not None and _h.get("hour_iso")
+        ]
     # 2026-05-21 bugfix: get_rm_age_sec expects kind in {"max","min"}, not
     # "high"/"low" — it had silently returned None (rm_age_sec logged as None,
     # and the regime tspeak proxy never fired). Now passes the correct kind.

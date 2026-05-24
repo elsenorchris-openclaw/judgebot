@@ -351,6 +351,25 @@ from LLM-first to pure-code push is in the change log below.
 > live `config.py`). Notable later reversals: median-bias correction was shipped then
 > reverted; the HIGH early-side trim is currently off.
 
+## Matcher obs fix: feed hourly_history (the dead hourly_obs_today key) — 2026-05-24
+
+The k-NN matcher's trajectory builder read `hourly_obs_today` from the wethr cache, but
+**no producer writes that key** — `wethr_cache_service` writes the hourly curve as
+`hourly_history`. So the matcher ran only on the last-60-min `temp_history` and sat on its
+`min_window_minutes=60` gate (>=12 five-min bins). Stations with sparser 5-min feeds fell
+to 7-11 bins -> "trajectory too short" -> chronic/intermittent no-projection: **KNYC fired
+0/all every day; KBOS/KDCA/KSEA intermittent** (5/23: NY/BOS/DC fired 0 all day despite
+BOS/DC having healthy obs density).
+
+Fix (`nn_shadow_worker` packet build): when `hourly_obs_today` is empty, map `hourly_history`
+-> the `{hour_utc_iso, temp_f, dewpt_f}` shape `nn_shadow.py` expects, restoring the morning
+curve. Replay 5/23 @peak-1h: **20/20 stations fire** (vs ~16 before). Confirmed live
+post-restart: BOS/SEA now produce projections. Same fix applied to v1max-high.
+
+Caveat: this is a coverage/correctness fix (more matcher fires), **not** a confirmed profit
+win -- the newly-covered stations have no settled track record and the broader signal still
+loses to the market. Pair with loss-reduction work, don't treat more volume as more profit.
+
 ## HIGH sizing tiers ($15 robust / $3 soft) + daily window-replay cron — 2026-05-23
 
 (1) HIGH max bet tiered by window validation: **$15** for the 15 ROBUST 30-min cells (PUSH_HIGH_MAX_BET_BY_STATION), **$3** for SOFT/NEG/default cells (MSP/MSY/SFO/SAT/DCA) via PUSH_HIGH_MAX_BET_DEFAULT; guardrail backstop $15. MAE conf-sizing still scales below the cap.
