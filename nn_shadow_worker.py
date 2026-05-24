@@ -1052,6 +1052,16 @@ def _try_auto_execute(cand, packet: dict, decision: dict,
             parse_error=None,
         )
         import paper_judge_bot as _pjb
+        # 2026-05-24: LOW posting probe. Post a maker limit at MID and rest it
+        # (async-adopted by low_post_probe.sweep) instead of crossing the wide
+        # LOW spread. Flag-gated, LOW-only; HIGH still crosses via execute_buy.
+        if (cand.series_prefix == "KXLOW"
+                and getattr(_cfg, "PUSH_LOW_POST_AT_MID", False)):
+            import low_post_probe
+            if low_post_probe.has_resting(cand.ticker) or cand.ticker in _rt.positions:
+                return False, "low_post_already_active"
+            return low_post_probe.place(_rt, cand, packet, entry_dec,
+                                        short_dir.lower(), decision)
         _pjb.execute_buy(_rt, cand, packet, entry_dec)
         return True, (f"executed {direction} edge={edge*100:.1f}pp ask={ask_c_i}c "
                       f"win={win_dbg}")

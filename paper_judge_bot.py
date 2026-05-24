@@ -4310,6 +4310,11 @@ def one_cycle(rt: Runtime) -> None:
     rt.hourly_cycles_run += 1
     rt.refresh_clock_and_flags()
     reconcile_positions_with_kalshi(rt)
+    try:
+        import low_post_probe
+        low_post_probe.sweep(rt)
+    except Exception as _lpe:
+        log.warning("low_post sweep failed: %s", _lpe)
     # Subscribe position tickers to WS so build_exit_packet's BBO overlay has
     # fresh data when run_exit_loop runs immediately below. Idempotent —
     # candidate-loop subscribe later in the cycle covers the same tickers if

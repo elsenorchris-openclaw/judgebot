@@ -491,6 +491,13 @@ SHADOW_NN_EVENT_DRIVEN: bool = True
 AUTO_EXECUTE_BUY_NO_PUSH: bool = True
 AUTO_EXECUTE_BUY_YES_PUSH: bool = True
 AUTO_EXEC_LOW_ENABLED: bool = True    # 2026-05-23 (Chris): ON as a $1 live probe (max_bet_low_series_usd=1, deep-pre-min window). Backtest: LOW BUY_NO loses crossing the wide spread; probe tests if live execution differs. Set False to re-pause.
+
+# 2026-05-24: LOW posting probe. When True, LOW push buys POST a maker limit at
+# MID (round((bid+ask)/2)) and REST it (async-adopted on fill) instead of crossing
+# the wide LOW spread (+1c taker). Backtest: LOW BUY at cross -8.1c/bet vs +1.8c at
+# mid -- LOW problem is execution, not signal. Measures live fill-rate at mid.
+# LOW-only; HIGH + the cross path are untouched. Set False to revert to crossing.
+PUSH_LOW_POST_AT_MID: bool = True
 PUSH_HIGH_MAX_BET_DEFAULT: float = 5.0  # 2026-05-23 (Chris): $5 uniform cap for ALL HIGH stations (collapsed tiered $15-robust / $3-soft). BY_STATION emptied -> every station uses this default. Prior 15-station robust set recoverable from git (commit 66b530e).
 PUSH_HIGH_MAX_BET_BY_STATION = {
     # 2026-05-23 (Chris): emptied -- collapsed the tiered $15-robust / $3-soft
