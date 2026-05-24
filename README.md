@@ -351,6 +351,17 @@ from LLM-first to pure-code push is in the change log below.
 > live `config.py`). Notable later reversals: median-bias correction was shipped then
 > reverted; the HIGH early-side trim is currently off.
 
+## MIA HIGH window deepened peak-1.5h -> peak-3.0h — 2026-05-24
+
+`PUSH_HIGH_TEMP_WINDOW_BY_STATION["KMIA"]` changed `(1.5, -1.0)` -> `(3.0, -2.5)`: the MIA
+30-min window now OPENS at peak-3.0h instead of peak-1.5h. Per-station live-era sweep (OOS,
+full gates incl. thin-margin (2d) + spread<=15c) found MIA's profit is DEEP: NO-only **+$7.50
+vs +$3.20** shipped, combined **+$9.02 vs +$1.75**, positive in BOTH date halves; the deep
+slots (2.5-3.5h) all win, shallow 0.5h loses (-$3.89). The shallow 1.5h window let mu rise
+near the bracket -> boundary YES bets (the 5/23 MIA B87-88 YES coin-flip). Sweep also tested
+DFW/PHX/PHL: DFW/PHL DROPPED (DFW worse under the thin-margin gate; PHL overfit zigzag), PHX
+HELD (NO-only ~even). Reversible: restore `(1.5, -1.0)`.
+
 ## Matcher obs fix: feed hourly_history (the dead hourly_obs_today key) — 2026-05-24
 
 The k-NN matcher's trajectory builder read `hourly_obs_today` from the wethr cache, but
