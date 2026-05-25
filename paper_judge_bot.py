@@ -4028,9 +4028,11 @@ def execute_buy(rt: Runtime, cand: market_universe.Candidate,
     state.upsert_entry(rt.positions, cand.ticker, rec)
     guardrails.record_buy(rt.ctx, cand.ticker, filled_cost)
     rt.persist_positions()
+    _nwp_d = packet.get("nwp_disagree")
+    _nwp_txt = (f" | NWP μ={packet.get('mu_nwp')} Δ={_nwp_d:.1f}°F" if _nwp_d is not None else "")
     discord_send(
         f"✅ **{decision.decision}** {filled}x @ {ask_c}c on `{cand.ticker}` "
-        f"(${filled_cost:.2f}, conv={decision.conviction:.2f}): {decision.read}"
+        f"(${filled_cost:.2f}, conv={decision.conviction:.2f}): {decision.read}{_nwp_txt}"
     )
 
 

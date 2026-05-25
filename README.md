@@ -391,6 +391,26 @@ near the bracket -> boundary YES bets (the 5/23 MIA B87-88 YES coin-flip). Sweep
 DFW/PHX/PHL: DFW/PHL DROPPED (DFW worse under the thin-margin gate; PHL overfit zigzag), PHX
 HELD (NO-only ~even). Reversible: restore `(1.5, -1.0)`.
 
+## NWP-agreement gate (HIGH) — 2026-05-25
+
+Skip a HIGH trade when the k-NN analog μ disagrees with an **independent NWP daily-high**
+(median of the latest NBM/HRRR/ECMWF runs from the shared GRIB cache, via `forecast_delta`)
+by more than `MU_AGREEMENT_MAX_DIFF_F` (=2.0°F). Flags: `USE_MU_AGREEMENT_GATE`. Gate in
+`_try_auto_execute` (HIGH only); **fail-open** if μ_nwp is unavailable. μ_nwp + disagreement
+are logged to the shadow log and appended to the Discord buy message.
+
+**Why:** the catastrophic losses are k-NN μ blow-ups (5–6°F off) on bad days; an independent
+NWP doesn't err the same way. Phase-1 backtest 5/19–5/21 (the only lever this session that
+adds *independent* information rather than re-slicing the k-NN signal): mean |μ_nwp − actual|
+**1.17°F** vs k-NN **1.88°F**; k-NN big-misses had mean disagreement 3.33°F vs 1.85°F for good
+ones (disagreement predicts error). Gate at 2.0°F: kept pool **+23% ROI (n=30)** vs removed
+**−34% (n=23)**; baseline was −2%. Threshold has a stable 1.75–2.25 plateau (not knife-edge).
+
+Caveats: n=53 backtest (5/19–5/21, the v1max candidate-log window — μ_nwp live source is the
+GRIB cache, ~same NWP); helps:hurts ~1:1 by count but the dollar separation is decisive; it
+still hurts on 5/20 (the one day high-disagreement won). Judge only (not v1max, the frozen
+control). Logs μ_nwp natively now so future backtests don't need the v1max cross-ref.
+
 ## Pause HIGH BUY_YES (structural losing side) — 2026-05-25
 
 Backtest on the faithful settled pool 5/19-5/23 (n=22): **HIGH BUY_YES is 36% win,

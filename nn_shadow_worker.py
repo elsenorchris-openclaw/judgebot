@@ -40,6 +40,37 @@ import shared_cache_reader
 import climate_normals
 import wethr_rm
 import config as _cfg
+import forecast_delta as _fd  # NWP daily-high (NBM/HRRR/ECMWF) for the agreement gate
+import datetime as _dtm
+from zoneinfo import ZoneInfo as _ZI
+
+_mu_nwp_cache: dict = {}  # (station, climate_day) -> (ts, mu_nwp)
+
+
+def _compute_mu_nwp(station: str, climate_day: str):
+    """Independent NWP daily-high (median of the latest NBM/HRRR/ECMWF runs from
+    the shared GRIB cache, via forecast_delta) used by the NWP-agreement gate.
+    Returns None when unavailable (gate then fails open)."""
+    key = (station, climate_day)
+    now = time.time()
+    c = _mu_nwp_cache.get(key)
+    if c and (now - c[0]) < 900:
+        return c[1]
+    mu = None
+    try:
+        tz_name = nn_shadow._STATION_TZ.get(station)
+        if tz_name:
+            d0 = _dtm.datetime.strptime(climate_day, "%Y-%m-%d").replace(tzinfo=_ZI(tz_name))
+            cs = d0.timestamp(); ce = (d0 + _dtm.timedelta(days=1)).timestamp()
+            runs = _fd.get_recent_runs(station, cs, ce, kind="high", n_runs=1)
+            highs = sorted(v[0]["extreme_f"] for v in runs.values()
+                           if v and v[0].get("extreme_f") is not None)
+            if highs:
+                mu = round(highs[len(highs) // 2], 2)
+    except Exception:
+        mu = None
+    _mu_nwp_cache[key] = (now, mu)
+    return mu
 
 log = logging.getLogger("judge.nn_shadow_worker")
 
@@ -851,6 +882,15 @@ def _try_auto_execute(cand, packet: dict, decision: dict,
     # helps:hurts 14:8. Shadow-eval still logs; HIGH BUY_NO + LOW probe unaffected.
     if series == "HIGH" and direction == "BUY_YES" and not getattr(_cfg, "AUTO_EXEC_HIGH_YES_ENABLED", True):
         return False, "high_buy_yes_paused"
+    # 2026-05-25 (Chris): NWP-agreement gate (HIGH). k-NN mu blows up 5-6F on bad
+    # days; the independent NBM/HRRR/ECMWF mu does not. Skip when they disagree by
+    # more than MU_AGREEMENT_MAX_DIFF_F. Phase-1 5/19-5/21: agree<=2F kept +23%
+    # ROI vs disagree>2F -34%. Fail-OPEN: if mu_nwp unavailable, do not gate.
+    if series == "HIGH" and getattr(_cfg, "USE_MU_AGREEMENT_GATE", False):
+        _nd = packet.get("nwp_disagree")
+        _thr = float(getattr(_cfg, "MU_AGREEMENT_MAX_DIFF_F", 2.0))
+        if _nd is not None and _nd > _thr:
+            return False, f"nwp_disagree {_nd:.1f}F>{_thr:.1f}F (mu_nwp={packet.get('mu_nwp')})"
     # (2) Decision window — peak-relative per (station, month, series)
     in_win, win_dbg = _in_decision_window(cand.station, series, local_hour, cand.climate_day)
     if not in_win:
@@ -1417,6 +1457,14 @@ def _evaluate_ticker(ticker: str, trigger: str) -> None:
                 pkt["mu_pre_bias"] = round(_raw, 3)
                 pkt["bias_applied"] = round(float(_po["bias"]), 3)
 
+        # 2026-05-25 (Chris): NWP-agreement signal. Independent NBM/HRRR/ECMWF
+        # daily-high (forecast_delta) as a cross-check on the k-NN mu; large
+        # |mu_knn - mu_nwp| flags an unreliable mu (the 5-6F blow-up days).
+        if cand.series_prefix == "KXHIGH":
+            _mn = _compute_mu_nwp(cand.station, cand.climate_day)
+            pkt["mu_nwp"] = _mn
+            pkt["nwp_disagree"] = round(abs(pkt["mu_chosen"] - _mn), 2) if _mn is not None else None
+
         # Per-series bet cap — single source of truth is the GUARDRAILS dict
         # (guardrails.check_buy enforces the same numbers downstream; sizing
         # here must match or guardrails would REJECT an over-cap bet outright).
@@ -1575,6 +1623,8 @@ def _evaluate_ticker(ticker: str, trigger: str) -> None:
             "size_usd": decision.get("size_usd"),
             "rm_locked": decision.get("rm_locked"),
             "reason": decision.get("reason"),
+            "mu_nwp": pkt.get("mu_nwp"),
+            "nwp_disagree": pkt.get("nwp_disagree"),
             # 2026-05-19: auto-execute outcome (push pure-code path)
             "auto_exec_attempted": decision["decision"] in ("BUY_NO", "BUY_YES"),
             "auto_exec_executed": executed,
