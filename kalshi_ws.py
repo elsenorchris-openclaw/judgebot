@@ -114,6 +114,21 @@ _cmd_id_counter = 0
 # Wired by start():
 _sign_fn: Optional[Callable[[str, str], dict[str, str]]] = None
 _log_fn: Callable[[str], None] = print
+# 2026-05-24: WS-health Discord alerting. _alert_fn(msg) injected via start(); the periodic
+# stats loop computes per-interval deltas and fires THROTTLED alerts on degradation
+# (drift not repairing / feed stalled / reconnect / error spike). Self-contained (no config
+# import). Disable with _WS_HEALTH_ALERTS=False.
+_alert_fn: Optional[Callable[[str], None]] = None
+try:
+    import os as _os
+    _BOT_LABEL = _os.path.basename(_os.path.dirname(_os.path.abspath(__file__))) or "bot"
+except Exception:
+    _BOT_LABEL = "bot"
+_WS_HEALTH_ALERTS = True
+_WS_DRIFT_SKIP_PER_INTERVAL = 1500
+_WS_ALERT_THROTTLE_SEC = 1800
+_ws_health_prev: dict = {}
+_ws_alert_last: dict = {}
 
 # 2026-05-18: BBO change callback registry. Event-driven consumers
 # (e.g., nn_shadow_worker) register here to be notified on every BBO
@@ -700,20 +715,66 @@ def _run_loop():
 # Public API (called from any thread)
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _ws_alert(cond: str, msg: str) -> None:
+    """Throttled Discord alert via the injected _alert_fn (per-condition throttle)."""
+    if not (_WS_HEALTH_ALERTS and _alert_fn):
+        return
+    now = time.time()
+    if now - _ws_alert_last.get(cond, 0.0) < _WS_ALERT_THROTTLE_SEC:
+        return
+    _ws_alert_last[cond] = now
+    try:
+        _alert_fn(msg)
+    except Exception as e:
+        try:
+            _log_fn(f"kalshi_ws: alert send failed: {e}")
+        except Exception:
+            pass
+
+
+def _ws_health_check(s: dict) -> None:
+    """Compare current stats to the previous interval; fire degradation alerts."""
+    if not _WS_HEALTH_ALERTS:
+        return
+    p = _ws_health_prev
+    if p:
+        def d(k):
+            return s.get(k, 0) - p.get(k, 0)
+        d_skip = d("cache_writes_skipped_inverted"); d_snap = d("snapshots")
+        d_bbo = d("bbo_updates"); d_delta = d("deltas"); d_recon = d("reconnects")
+        d_err = d("errors"); d_rsent = d("resyncs_sent")
+        if d_skip > _WS_DRIFT_SKIP_PER_INTERVAL or (d_rsent >= 5 and d_snap == 0 and d_skip > 200):
+            _ws_alert("drift", "WARN [%s] WS orderbook drift not clearing: cache_skip_inv +%d/30s, snapshots +%d, resyncs_sent +%d -> resync repair may be failing -> stale BBO starves the matcher." % (_BOT_LABEL, d_skip, d_snap, d_rsent))
+        if s.get("connected") and d_delta == 0 and d_bbo == 0:
+            _ws_alert("stall", "WARN [%s] WS feed stalled: 0 deltas + 0 bbo_updates in 30s while connected -> matcher cannot fire." % _BOT_LABEL)
+        if d_recon > 0:
+            _ws_alert("reconnect", "INFO [%s] WS reconnected (+%d)." % (_BOT_LABEL, d_recon))
+        if d_err > 5:
+            _ws_alert("errors", "WARN [%s] WS error spike: +%d errors in 30s." % (_BOT_LABEL, d_err))
+    _ws_health_prev.clear(); _ws_health_prev.update(s)
+
+
 def start(sign_fn: Callable[[str, str], dict[str, str]],
-          log_fn: Optional[Callable[[str], None]] = None) -> None:
+          log_fn: Optional[Callable[[str], None]] = None,
+          alert_fn: Optional[Callable[[str], None]] = None) -> None:
     """Start the WS client thread.
 
     sign_fn(method, path) -> dict[str, str] of auth headers (same RSA-PSS
     signature scheme used for REST GET requests). Sign with method='GET'
     and path=KALSHI_WS_PATH.
     """
-    global _thread, _started, _sign_fn, _log_fn
+    global _thread, _started, _sign_fn, _log_fn, _alert_fn
     if _started:
         return
     _sign_fn = sign_fn
     if log_fn is not None:
         _log_fn = log_fn
+    if alert_fn is not None:
+        _alert_fn = alert_fn
+        try:
+            alert_fn("INFO [%s] kalshi_ws started -- WS-health alerts armed." % _BOT_LABEL)
+        except Exception:
+            pass
     _thread = threading.Thread(target=_run_loop, name="kalshi_ws", daemon=True)
     _thread.start()
     _started = True
@@ -749,6 +810,7 @@ def start(sign_fn: Callable[[str, str], dict[str, str]],
                     f"ob_miss_stale={s.get('ob_misses_stale',0)} "
                     f"ob_miss_inv={s.get('ob_misses_inverted',0)}"
                 )
+                _ws_health_check(s)
             except Exception:
                 pass
     threading.Thread(target=_periodic_stats, name="kalshi_ws_stats", daemon=True).start()

@@ -351,6 +351,20 @@ from LLM-first to pure-code push is in the change log below.
 > live `config.py`). Notable later reversals: median-bias correction was shipped then
 > reverted; the HIGH early-side trim is currently off.
 
+## Discord alerts: WS-health watchdog + uncaught-crash hooks — 2026-05-24
+
+Proactive Discord visibility for the failure modes that silently stop the bot trading.
+(1) WS-health watchdog in `kalshi_ws._periodic_stats`: every 30s it diffs the counters and
+fires THROTTLED (1/30min per condition) alerts on: orderbook drift not clearing
+(cache_skip_inv climbing while snapshots flat = the resync-failure signature), feed stalled
+(0 deltas+0 bbo_updates/30s while connected), WS reconnect, and error spikes. (2) Crash
+hooks: `sys.excepthook` + `threading.excepthook` route ANY uncaught exception (main or
+background thread) to Discord with the traceback (throttled 1/60s). Both reuse
+`discord_send` (same channel as peak/window alerts); each bot labels alerts by dir name
+(judge vs v1max). A one-time 'WS-health alerts armed' ping posts on startup (doubles as a
+restart heartbeat). Reversible: `kalshi_ws._WS_HEALTH_ALERTS=False`. Built after the WS-
+resync bug silently degraded v1max for hours before anyone noticed.
+
 ## WS resync now actually re-snapshots (root-cause fix for drift accumulation) — 2026-05-24
 
 The L2 orderbook resync was a SILENT NO-OP. On drift (a stale level makes top-YES-bid +

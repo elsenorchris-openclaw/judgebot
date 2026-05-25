@@ -362,6 +362,32 @@ def discord_send(msg: str) -> None:
     log.debug("discord skipped (no transport configured): %s", msg[:120])
 
 
+def _install_crash_alerts() -> None:
+    """Route uncaught exceptions (main thread + background threads) to Discord (throttled)."""
+    import sys as _sys, traceback as _tb, os as _os, time as _t, threading as _th
+    _label = _os.path.basename(_os.path.dirname(_os.path.abspath(__file__))) or "bot"
+    _last = [0.0]
+    def _emit(where, et, ev, tb):
+        now = _t.time()
+        if now - _last[0] < 60:
+            return
+        _last[0] = now
+        try:
+            tbstr = "".join(_tb.format_exception(et, ev, tb))[-1500:]
+            discord_send("CRASH [%s] uncaught in %s:\n```\n%s\n```" % (_label, where, tbstr))
+        except Exception:
+            pass
+    _prev = _sys.excepthook
+    def _hook(et, ev, tb):
+        _emit("main", et, ev, tb)
+        _prev(et, ev, tb)
+    _sys.excepthook = _hook
+    def _thook(a):
+        _emit("thread:%s" % getattr(a.thread, "name", "?"), a.exc_type, a.exc_value, a.exc_traceback)
+        _th.__excepthook__(a)
+    _th.excepthook = _thook
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Situation-packet builders
 # ─────────────────────────────────────────────────────────────────────────────
@@ -4407,6 +4433,7 @@ def one_cycle(rt: Runtime) -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 def main() -> int:
     config.apply_env()
+    _install_crash_alerts()
     parser = argparse.ArgumentParser()
     parser.add_argument("--once", action="store_true", help="run one cycle and exit")
     args = parser.parse_args()
@@ -4419,7 +4446,7 @@ def main() -> int:
     wethr_rm.start()
     if USE_KALSHI_WS:
         try:
-            kalshi_ws.start(kalshi_client._sign, log_fn=lambda s: log.info(s))
+            kalshi_ws.start(kalshi_client._sign, log_fn=lambda s: log.info(s), alert_fn=discord_send)
         except Exception as _ws_e:
             log.warning("kalshi_ws.start failed: %s — execute_buy will use REST fallback", _ws_e)
     rt = Runtime()
