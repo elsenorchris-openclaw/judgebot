@@ -70,6 +70,15 @@ def has_resting(ticker: str) -> bool:
         return any(r.get("ticker") == ticker for r in _load())
 
 
+def resting_rows() -> list[dict]:
+    """Snapshot of currently-resting (unadopted) probe orders. The auto-exec
+    position cap counts these so a resting maker order occupies its per-(station,
+    direction) slot, instead of letting a second same-direction bracket slip
+    through before the first fills."""
+    with _lock:
+        return list(_load())
+
+
 def _mid_post_c(bid_c, ask_c) -> Optional[int]:
     """MID = round((bid+ask)/2), clamped to a maker price in [bid, ask-1]."""
     if bid_c is None or ask_c is None:

@@ -986,6 +986,31 @@ def _try_auto_execute(cand, packet: dict, decision: dict,
                 n_existing += 1
     except Exception:
         pass
+    # 2026-05-25: a resting LOW posting-probe order (low_post_probe posts a maker
+    # at mid and rests until it fills) is not yet in _rt.positions, so a second
+    # same-direction bracket on the same station/day could slip past this cap
+    # before the first fills (e.g. LV 5/25 took two BUY_YES). Count resting
+    # orders toward the same per-(station, direction) slot. Same-ticker re-evals
+    # are caught by has_resting() in the LOW branch below, so skip them here.
+    try:
+        import low_post_probe
+        pos_tickers = set(getattr(_rt, "positions", {}) or {})
+        for r in low_post_probe.resting_rows():
+            tk = str(r.get("ticker", ""))
+            if tk == cand.ticker or tk in pos_tickers:
+                continue
+            if not tk.startswith(cand.series_prefix):
+                continue
+            ctx = r.get("entry_ctx") or {}
+            if ctx.get("station") != cand.station:
+                continue
+            if ctx.get("action") != direction:
+                continue
+            if str(r.get("climate_day", "")) != cand.climate_day:
+                continue
+            n_existing += 1
+    except Exception:
+        pass
     if n_existing >= cap_per_dir:
         return False, (f"position_cap {direction}@{cand.station}/{cand.series_prefix}: "
                        f"{n_existing}>={cap_per_dir}")
