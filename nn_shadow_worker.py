@@ -1553,6 +1553,20 @@ def _evaluate_ticker(ticker: str, trigger: str) -> None:
                     decision["size_usd"] = round(_new_qty * _price_usd, 2)
                     pkt["no_bet_scaled_usd"] = _no_cap
 
+        # 2026-05-25 (Chris): HIGH BUY_YES re-enabled at a reduced $3 cap (weaker
+        # side -- backtest 36% win / -20% ROI -- run small). pure_nn_decide sized to
+        # _high_cap ($5); cap the qty DOWN so cost <= PUSH_HIGH_YES_MAX_BET_USD.
+        if _is_high_sizing and decision.get("decision") == "BUY_YES":
+            _yes_cap = float(getattr(_cfg, "PUSH_HIGH_YES_MAX_BET_USD", _high_cap))
+            _price_c = decision.get("price_c")
+            if _yes_cap < _high_cap and _price_c:
+                _price_usd = float(_price_c) / 100.0
+                _max_qty = int(_yes_cap // _price_usd) if _price_usd > 0 else 0
+                if _max_qty >= 1 and (decision.get("qty") or 0) > _max_qty:
+                    decision["qty"] = _max_qty
+                    decision["size_usd"] = round(_max_qty * _price_usd, 2)
+                    pkt["yes_bet_capped_usd"] = _yes_cap
+
         if decision["decision"] in ("BUY_YES", "BUY_NO"):
             _bump("evals_buy_decisions")
         else:
