@@ -953,7 +953,7 @@ NN_HIGH_AT_PEAK_TEMP_BAND_F: float = 1.0   # tier 2 fires when cur_tmpf >= traj_
 NN_K_HIGH: int = 50                       # rolled back 2026-05-18 from k=150; per-station equal-weighted analysis showed k=150 regressed 10/20 stations (MIA +17%, AUS +10%, NYC +7%, DFW +6%); lookback=180min change retained
 NN_K_LOW: int = 50                       # unchanged — LOW lookback gain
                                          # was -1.7% on n=1163, not material
-NN_LOOKBACK_HIGH_MIN: int = 180          # truncate trajectory to last 180min
+NN_LOOKBACK_HIGH_MIN: int = 0            # 2026-05-25: 180->0 (full climate-day curve, like LOW). The 180-min truncation ran the matcher on a different mu than the shipped windows were built on (push windows derive from the per_hour_quality backtest, which uses the FULL morning curve, traj_n_bins~140). It also caused chronic/intermittent live no-fire for sparse-feed stations (NYC/BOS/SEA/DEN) when the last 180min had <12 5-min bins. Faithful full-vs-180 backtest (live era, current windows, 18pp floor): full +6.4c/bet n369 vs 180 +6.0c/bet n348 -- per-bet EV ~unchanged, full adds coverage (+21 trades; OKC/SEA clearly prefer full). JUDGE-ONLY (v1max frozen). Revert to 180 to restore truncation.
 NN_LOOKBACK_LOW_MIN: int = 0             # 0 = full climate-day trajectory (current)
 
 # 2026-05-18: pres1 trajectory matching weight (LOW only).
