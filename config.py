@@ -698,17 +698,6 @@ USE_TAIL_EMPIRICAL_PYES: bool = True
 # volume while filtering bottom-edge marginal trades.
 PUSH_MIN_EDGE_PP: int = 12
 
-# Minimum hours-until-peak for HIGH-series entries (defense-in-depth on top
-# of the window override). At peak, rm has converged on the day's true max,
-# so the nn_match mu projection over-extrapolates and flips adjacent
-# brackets the wrong way. 2026-05-20 backtest n=47 HIGH push trades:
-# h_to_peak<0.5 catches 3 losers (PHIL B95.5 BUY_NO, NOLA B86.5 BUY_NO,
-# NOLA B88.5 BUY_YES) for -$13.07; 0 winners caught (nearest winner at
-# h_to_peak=+0.70). Mechanism: at peak, rm ~= final max with stable
-# obs_trend_30m; mu still projects upward = systematic over-projection.
-# Set to None or 0.0 to disable.
-PUSH_MIN_H_TO_PEAK_HIGH = None  # was 0.5; DISABLED 2026-05-22 -- per-station windows now control timing (every HIGH window ends >=1h before peak, so the gate was redundant). Set back to 0.5 to re-enable.
-
 # In-bracket tail-bet gate (Gate 2). When the nn mu sits INSIDE the YES window
 # [floor-0.5, cap+0.5) but the bot picks the smaller-mass (tail) side
 # (p_chosen < 0.5), it is betting against its own central estimate for a thin

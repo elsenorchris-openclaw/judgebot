@@ -859,17 +859,6 @@ def _try_auto_execute(cand, packet: dict, decision: dict,
             _yb = packet.get("yes_bid_c"); _ya = packet.get("yes_ask_c")
             if _yb is not None and _ya is not None and (_ya - _yb) > _msp:
                 return False, f"spread_too_wide {_ya - _yb:.0f}c>{_msp:.0f}c"
-    # (2a) HIGH-only: block at-or-past-peak entries. At peak, rm has converged
-    # on the day's true max, leaving no headroom for the nn_match mu to add
-    # real signal -- instead it over-extrapolates and flips adjacent brackets
-    # the wrong way. 2026-05-20: 3 today losses -$13.07 at h_to_peak<0.5.
-    if series == "HIGH":
-        h2pk = (packet.get("local_clock") or {}).get("h_to_peak")
-        min_h2pk_raw = getattr(_cfg, "PUSH_MIN_H_TO_PEAK_HIGH", 0.5)
-        if h2pk is not None and min_h2pk_raw is not None:
-            min_h2pk = float(min_h2pk_raw)
-            if h2pk < min_h2pk:
-                return False, f"h2pk_too_low {h2pk:.2f}<{min_h2pk}"
     # (2d) HIGH-only thin-margin BUY_NO gate. Skip a B-bracket BUY_NO when the
     # CLI-adjusted forecast (mu - per-station obs->CLI offset) lands INSIDE the
     # bracket [floor-0.5, cap+0.5] -- shorting a bracket our own mu points into.

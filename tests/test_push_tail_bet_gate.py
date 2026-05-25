@@ -75,10 +75,8 @@ class TestPushTailBetGate(unittest.TestCase):
         nsw._rt = SimpleNamespace(positions={}, cycle_buys_by_station_side={})
         self._orig_tail = getattr(config, "PUSH_TAIL_BET_MIN_EDGE_PP", None)
         self._orig_min_edge = getattr(config, "PUSH_MIN_EDGE_PP", None)
-        self._orig_h2pk = getattr(config, "PUSH_MIN_H_TO_PEAK_HIGH", None)
         config.PUSH_TAIL_BET_MIN_EDGE_PP = 25
         config.PUSH_MIN_EDGE_PP = 12
-        config.PUSH_MIN_H_TO_PEAK_HIGH = 0.5
         self._orig_no = getattr(config, "AUTO_EXECUTE_BUY_NO_PUSH", None)
         self._orig_yes = getattr(config, "AUTO_EXECUTE_BUY_YES_PUSH", None)
         config.AUTO_EXECUTE_BUY_NO_PUSH = True
@@ -91,8 +89,6 @@ class TestPushTailBetGate(unittest.TestCase):
             config.PUSH_TAIL_BET_MIN_EDGE_PP = self._orig_tail
         if self._orig_min_edge is not None:
             config.PUSH_MIN_EDGE_PP = self._orig_min_edge
-        if self._orig_h2pk is not None:
-            config.PUSH_MIN_H_TO_PEAK_HIGH = self._orig_h2pk
         if self._orig_no is not None:
             config.AUTO_EXECUTE_BUY_NO_PUSH = self._orig_no
         if self._orig_yes is not None:
