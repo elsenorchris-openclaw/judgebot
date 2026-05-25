@@ -699,7 +699,7 @@ USE_TAIL_EMPIRICAL_PYES: bool = True
 # pure-nn cohort: 6→12pp lifts ROI from −0.0% → +0.8%; 6→15pp to +3.3%;
 # 6→20pp to +6.0%. 12pp chosen as conservative move that preserves 70% of
 # volume while filtering bottom-edge marginal trades.
-PUSH_MIN_EDGE_PP: int = 12
+PUSH_MIN_EDGE_PP: int = 18  # 2026-05-25 (validated): 12->18. Faithful HIGH backtest n=867 both OOS halves: 12-18pp band = -5.7c/bet; floor 18 lifts total +49->+55, c/bet +5.7->+7.2, both halves up; 20 over-trims. JUDGE-ONLY (v1max frozen).
 
 # In-bracket tail-bet gate (Gate 2). When the nn mu sits INSIDE the YES window
 # [floor-0.5, cap+0.5) but the bot picks the smaller-mass (tail) side
