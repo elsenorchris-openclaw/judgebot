@@ -502,7 +502,7 @@ MU_AGREEMENT_MAX_DIFF_F: float = 2.0  # disagreement (deg F) above which the HIG
 # mid -- LOW problem is execution, not signal. Measures live fill-rate at mid.
 # LOW-only; HIGH + the cross path are untouched. Set False to revert to crossing.
 PUSH_LOW_POST_AT_MID: bool = True
-PUSH_HIGH_MAX_BET_DEFAULT: float = 5.0  # 2026-05-23 (Chris): $5 uniform cap for ALL HIGH stations (collapsed tiered $15-robust / $3-soft). BY_STATION emptied -> every station uses this default. Prior 15-station robust set recoverable from git (commit 66b530e).
+PUSH_HIGH_MAX_BET_DEFAULT: float = 3.0  # 2026-05-25 (Chris): lowered 5->3 for all NON-edge HIGH stations. Only BOS/SEA (the 2 stations that beat the market) are sized up to $15 via PUSH_HIGH_MAX_BET_BY_STATION; every OTHER station uses this $3 default. (Was $5 uniform 5/23; prior 15-station $15-robust set recoverable from commit 66b530e.)
 PUSH_HIGH_MAX_BET_BY_STATION = {
     # 2026-05-25 (Chris): BOS + SEA sized to $15 -- the ONLY two stations whose
     # matcher actually beats the market on Brier (last-month, h2pk 2-5: BOS
