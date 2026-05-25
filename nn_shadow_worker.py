@@ -882,6 +882,11 @@ def _try_auto_execute(cand, packet: dict, decision: dict,
     # helps:hurts 14:8. Shadow-eval still logs; HIGH BUY_NO + LOW probe unaffected.
     if series == "HIGH" and direction == "BUY_YES" and not getattr(_cfg, "AUTO_EXEC_HIGH_YES_ENABLED", True):
         return False, "high_buy_yes_paused"
+    # 2026-05-25 (Chris): per-station HIGH bench. Stations in PUSH_HIGH_DISABLED_STATIONS
+    # had no +EV window at ANY offset in the last-month faithful regen (e.g. KSFO -26c).
+    # Skip HIGH push entirely rather than trade a least-bad loser. LOW unaffected.
+    if series == "HIGH" and cand.station in (getattr(_cfg, "PUSH_HIGH_DISABLED_STATIONS", frozenset()) or frozenset()):
+        return False, f"high_station_benched:{cand.station}"
     # 2026-05-25 (Chris): NWP-agreement gate (HIGH). k-NN mu blows up 5-6F on bad
     # days; the independent NBM/HRRR/ECMWF mu does not. Skip when they disagree by
     # more than MU_AGREEMENT_MAX_DIFF_F. Phase-1 5/19-5/21: agree<=2F kept +23%

@@ -575,40 +575,47 @@ PUSH_EARLY_TRIM_MAE_MAX: float = 1.6      # only "accurate" cells (full-size tie
 # month) regen once the full multi-year backfill lands. HIGHER VARIANCE (31% win).
 PUSH_HIGH_TEMP_WINDOW = (2.0, -1.5)   # (before, after); None=off. 2026-05-23: 30-min deep default [peak-2,peak-1.5], BEGINS at peak-2 (profitable deep zone). For stations not in BY_STATION.
 
-# 2026-05-22: per-station HIGH window overrides (v1, price-gated backtest, May
-# 2026 only; thin n~8-11/band -> regenerate from the deep historical backfill).
-# Looked up before the global PUSH_HIGH_TEMP_WINDOW above; a station ABSENT here
-# falls back to that global deep default. Reversible: set to None/{} to revert
-# all HIGH to the global. (before, after) hrs vs fractional peak; window =
-# [peak-before, peak+after]. AUS sits near-peak -- it LOSES deep pre-peak.
+# 2026-05-25 (Chris): per-station HIGH price windows, REGENERATED from the
+# LAST-MONTH faithful sweep (Apr 22-May 20, 29 days), buy-at-window-open, live
+# 18pp edge floor, 30-min windows. Looked up before the global
+# PUSH_HIGH_TEMP_WINDOW above; a station ABSENT here falls back to that global
+# deep default. Reversible: set to None/{} to revert all HIGH to the global.
+# (before, after) hrs vs fractional peak; window = [peak-before, peak+after].
+# Dominant finding vs the prior windows: they were too SHALLOW -> most stations
+# moved DEEPER (the market is soft 3-5h pre-peak and sharp into the peak).
 PUSH_HIGH_TEMP_WINDOW_BY_STATION = {
-    # 2026-05-23 FULL-data (post gap-fill) 30-MINUTE per-station BUY_NO windows.
-    # (before, after) = [peak-before, peak+after]; every window is 30 min and
-    # BEGINS at peak-before = the most-profitable buy-slot (bot buys at open).
-    # Faithful gated buy-at-open sweep, early/late split. Flags: ROBUST=+both
-    # halves; SOFT=one half negative; NEG=negative best (shipped per Chris "all
-    # stations"); default=no usable data.
-    "KATL": (3.5, -3.0),   # ROBUST  +9.2c  n=36
-    "KAUS": (2.5, -2.0),   # ROBUST  +11.4c n=21
-    "KBOS": (1.5, -1.0),   # ROBUST  +14.9c n=35
-    "KDCA": (2.0, -1.5),   # no data (stale projections) -> deep default
-    "KDEN": (2.0, -1.5),   # ROBUST  +5.5c  n=41
-    "KDFW": (2.5, -2.0),   # ROBUST  +19.6c n=24
-    "KHOU": (1.0, -0.5),   # ROBUST  +8.8c  n=32
-    "KLAS": (2.0, -1.5),   # ROBUST  +5.0c  n=49
-    "KLAX": (3.0, -2.5),   # ROBUST  +10.5c n=33
-    "KMDW": (1.0, -0.5),   # ROBUST  +10.2c n=41
-    "KMIA": (3.0, -2.5),   # 2026-05-24: deepened 1.5->3.0 (Chris). Live-era sweep w/ full gates: NO-only +$7.50 vs +$3.20 shipped, both OOS halves +; shallow 1.5 pulled into boundary YES bets (e.g. 5/23 MIA). n=22.
-    "KMSP": (1.5, -1.0),   # SOFT    +0.7c  n=31 (early half -10.8)
-    "KMSY": (2.5, -2.0),   # SOFT    +11.9c n=28 (late half -5.8)
-    "KNYC": (1.5, -1.0),   # ROBUST  +2.8c  n=45
-    "KOKC": (1.0, -0.5),   # ROBUST  +8.6c  n=28
-    "KPHL": (3.0, -2.5),   # ROBUST  +5.3c  n=43
-    "KPHX": (2.0, -1.5),   # ROBUST  +8.4c  n=27
-    "KSAT": (2.0, -1.5),   # NEG     -3.9c  n=26 (no +EV slot; shipped per "all stations")
-    "KSEA": (3.0, -2.5),   # ROBUST  +19.5c n=48
-    "KSFO": (3.5, -3.0),   # SOFT    +3.7c  n=48 (early half -2.9)
+    # Defensible ship rule: moved to a new window only where well-supported
+    # (n>=8, BOTH date-halves positive, profitable); else kept the prior live
+    # window. c/bet + n are the last-month buy-at-open numbers. KSFO is BENCHED
+    # (PUSH_HIGH_DISABLED_STATIONS below) -- it had no +EV window at any offset.
+    "KATL": (2.0, -1.5),   # +14c n17 (was 3.5; shallower)
+    "KAUS": (4.5, -4.0),   # +19c n8  (was 2.5 -5c -> flips +, DEEPER)
+    "KBOS": (5.0, -4.5),   # +44c n10 90%WR (was 1.5 +7c; DEEPER, clean monotonic rise)
+    "KDCA": (2.0, -1.5),   # no last-month data -> global deep default (unchanged)
+    "KDEN": (2.0, -1.5),   # +6c n14 (unchanged; deep is +EV but thin n6)
+    "KDFW": (3.0, -2.5),   # +38c n8  (was 2.5 +7c; DEEPER)
+    "KHOU": (4.0, -3.5),   # +8c n12  (was 1.0 -12c -> flips +, DEEPER; deep -> watch stale AM fills)
+    "KLAS": (2.5, -2.0),   # +14c n18 (was 2.0; DEEPER)
+    "KLAX": (2.0, -1.5),   # +11c n15 (was 3.0 -1c -> flips +, shallower)
+    "KMDW": (2.5, -2.0),   # +17c n12 (was 1.0 -18c -> flips +, DEEPER)
+    "KMIA": (2.5, -2.0),   # +26c n15 (was 3.0 +18c; shallower)
+    "KMSP": (3.0, -2.5),   # +6c n14  (was 1.5 -2c -> flips +, DEEPER)
+    "KMSY": (2.5, -2.0),   # +9c n13  (unchanged)
+    "KNYC": (3.5, -3.0),   # +9c n17  (was 1.5; DEEPER for both-halves robustness -- 1.5 had higher c/bet but one half negative)
+    "KOKC": (2.5, -2.0),   # +19c n12 (was 1.0; DEEPER)
+    "KPHL": (3.0, -2.5),   # +11c n13 (unchanged; no better both-halves+ window)
+    "KPHX": (3.0, -2.5),   # +13c n12 (was 2.0; DEEPER)
+    "KSAT": (3.0, -2.5),   # +17c n13 (was 2.0; DEEPER)
+    "KSEA": (3.0, -2.5),   # +27c n14 (unchanged; already best)
 }
+
+# 2026-05-25 (Chris): HIGH stations to BENCH (skip HIGH push auto-exec entirely).
+# Last-month faithful regen found NO +EV window at any 0.5h offset (KSFO: -26c at
+# the live window, negative every slot). Gated in nn_shadow_worker._try_auto_execute
+# as "high_station_benched". LOW is unaffected. Reversible: remove the station.
+# NB: simply OMITTING a station from PUSH_HIGH_TEMP_WINDOW_BY_STATION does NOT bench
+# it -- it falls back to the global PUSH_HIGH_TEMP_WINDOW window. Benching needs this set.
+PUSH_HIGH_DISABLED_STATIONS = frozenset({"KSFO"})
 
 # 2026-05-22: LOW placeholder window (analog to PUSH_HIGH_TEMP_WINDOW). The
 # MAE-built LOW overrides open too deep pre-min (h2pk>=2.0 = 40% WR in faithful
