@@ -601,7 +601,7 @@ PUSH_HIGH_TEMP_WINDOW_BY_STATION = {
     "KMIA": (2.5, -2.0),   # +26c n15 (was 3.0 +18c; shallower)
     "KMSP": (3.0, -2.5),   # +6c n14  (was 1.5 -2c -> flips +, DEEPER)
     "KMSY": (2.5, -2.0),   # +9c n13  (unchanged)
-    "KNYC": (3.5, -3.0),   # +9c n17  (was 1.5; DEEPER for both-halves robustness -- 1.5 had higher c/bet but one half negative)
+    "KNYC": (2.5, -2.0),   # 2026-05-25: 3.5->2.5. The 3.5h window backtests NEGATIVE at the live 18pp floor (-7.2c May / -7.5c all-era, NO 37%) -- mu over-projects the high ~+1F that deep, so it shorts brackets the high lands in. peak-2.5h is robust both-halves +EV (+12.1c May / +3.6c all-era, NO 57%). On full-curve mu (NN_LOOKBACK_HIGH_MIN=0). Prior 3.5 "+9c n17" was a last-month/12pp-floor artifact.
     "KOKC": (2.5, -2.0),   # +19c n12 (was 1.0; DEEPER)
     "KPHL": (3.0, -2.5),   # +11c n13 (unchanged; no better both-halves+ window)
     "KPHX": (3.0, -2.5),   # +13c n12 (was 2.0; DEEPER)
