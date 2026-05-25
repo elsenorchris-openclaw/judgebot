@@ -380,7 +380,7 @@ GUARDRAILS = {
     # 2026-05-20: raised 5 -> 15 (Chris directive). HIGH is the profitable book
     # (+$40 on 5/20 vs LOW -$24); lean bet size into it. pure_nn_decide sizing
     # reads this same value via the worker so qty is sized to match the cap.
-    "max_bet_high_series_usd": 5.0,  # 2026-05-23 (Chris): $5 uniform HIGH cap for ALL stations (was $15 backstop for tiered $15-robust/$3-soft). Hard cap so no HIGH bet exceeds $5.
+    "max_bet_high_series_usd": 15.0,  # 2026-05-25 (Chris): raised 5->15 as the BACKSTOP ceiling for the per-station BOS/SEA $15 sizing (the only 2 stations we beat the market on, Brier +8-12%). Per-bet size is set by PUSH_HIGH_MAX_BET_BY_STATION (BOS/SEA=$15) / PUSH_HIGH_MAX_BET_DEFAULT ($5 for all others); this guardrail only REJECTS bets ABOVE 15, it does NOT raise anyone's size.
     # 2026-05-16 (evening): LOW-series brackets (KXLOW-*) capped at $5 alongside
     # HIGH while validating the nn_match k-NN heating-curve projector as the
     # primary μ source. Symmetric to max_bet_high_series_usd; applied at
@@ -504,10 +504,15 @@ MU_AGREEMENT_MAX_DIFF_F: float = 2.0  # disagreement (deg F) above which the HIG
 PUSH_LOW_POST_AT_MID: bool = True
 PUSH_HIGH_MAX_BET_DEFAULT: float = 5.0  # 2026-05-23 (Chris): $5 uniform cap for ALL HIGH stations (collapsed tiered $15-robust / $3-soft). BY_STATION emptied -> every station uses this default. Prior 15-station robust set recoverable from git (commit 66b530e).
 PUSH_HIGH_MAX_BET_BY_STATION = {
-    # 2026-05-23 (Chris): emptied -- collapsed the tiered $15-robust / $3-soft
-    # sizing to a flat $5 for ALL HIGH stations (PUSH_HIGH_MAX_BET_DEFAULT=5).
-    # The prior 15-station ROBUST set ($15) is recoverable from git (commit
-    # 66b530e); re-add {station: usd} to re-tier any cell above the default.
+    # 2026-05-25 (Chris): BOS + SEA sized to $15 -- the ONLY two stations whose
+    # matcher actually beats the market on Brier (last-month, h2pk 2-5: BOS
+    # +9-12%, SEA +8%, n~300 each, robust across aggregators). Concentrate
+    # capital where we have a real, market-relative edge. ALL OTHER stations
+    # stay $5 via PUSH_HIGH_MAX_BET_DEFAULT (unchanged). Requires the guardrail
+    # max_bet_high_series_usd=15 (backstop) or these get rejected. HIGH YES is
+    # unaffected -- it stays $3 via the PUSH_HIGH_YES_MAX_BET_USD down-size.
+    "KBOS": 15.0,
+    "KSEA": 15.0,
 }
 PUSH_HIGH_NO_BET_BY_STATION = {}  # 2026-05-22 (Chris): removed the $30 MIA-NO carve-out — uniform $15 max for all HIGH now (PUSH_HIGH_MAX_BET_DEFAULT). NO-resize code in nn_shadow_worker stays but is dormant while empty; re-add {station: usd} to size a NO cell up.
 
