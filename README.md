@@ -351,6 +351,21 @@ from LLM-first to pure-code push is in the change log below.
 > live `config.py`). Notable later reversals: median-bias correction was shipped then
 > reverted; the HIGH early-side trim is currently off.
 
+## WS resync now actually re-snapshots (root-cause fix for drift accumulation) — 2026-05-24
+
+The L2 orderbook resync was a SILENT NO-OP. On drift (a stale level makes top-YES-bid +
+top-NO-bid > 100c = an inversion) it re-sent `subscribe` for the already-subscribed ticker --
+but Kalshi snapshots only on the FIRST subscribe of a channel; later subscribes return
+`{"type":"ok"}` and are added to the existing sid with NO snapshot. So drifted books were
+NEVER repaired -> inversions accumulated unbounded over uptime (cache_skip_inv into the
+millions) -> stale BBO -> the matcher's eval trigger starved -> the bot slowly stopped
+trading. Only a restart/reconnect fixed it. Fix: capture the connection's single
+orderbook_delta sid and re-snapshot drifted tickers via update_subscription
+delete_markets+add_markets, which DOES resend a snapshot. Verified live on v1max: snapshots
+climb past sub-count (122->184 in 5 min), cache_skip_inv=0. Reversible:
+_RESYNC_VIA_UPDATE_SUB=False. Daily v1max-restart timer stays as a safety net until ~a day
+confirms durability.
+
 ## MIA HIGH window deepened peak-1.5h -> peak-3.0h — 2026-05-24
 
 `PUSH_HIGH_TEMP_WINDOW_BY_STATION["KMIA"]` changed `(1.5, -1.0)` -> `(3.0, -2.5)`: the MIA

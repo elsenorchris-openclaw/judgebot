@@ -91,6 +91,16 @@ _pending_resync: set[str] = set()            # tickers awaiting next resync send
 _last_resync_ts: dict[str, float] = {}       # ticker -> ts of last resync request
 _resync_state_lock = threading.Lock()
 
+# 2026-05-24: a plain re-subscribe is a SILENT NO-OP on Kalshi (returns {"type":"ok"} with
+# NO snapshot), so the old resync never repaired drifted/inverted books -> inversions piled up
+# unbounded over uptime -> stale BBO -> matcher eval starvation -> bot stops trading. Kalshi
+# assigns ONE sid per channel: the first subscribe -> {"type":"subscribed", sid}; bulk/later
+# subscribes -> {"type":"ok"} added to that same sid. Capture that one orderbook_delta sid and
+# re-snapshot drifted tickers via update_subscription delete_markets+add_markets (which DOES
+# resend a snapshot). Reversible: _RESYNC_VIA_UPDATE_SUB=False -> legacy (broken) re-subscribe.
+_RESYNC_VIA_UPDATE_SUB = True
+_orderbook_sid = None        # the connection's single orderbook_delta subscription id
+
 # 2026-04-11: fill channel (private). Subscribed once at startup, no per-ticker
 # subscription needed. Each fill event populates _fills_by_order so the bot's
 # check_order_fill() can shortcircuit the REST poll.
@@ -147,6 +157,7 @@ _stats = {
     "resyncs_scheduled_drift": 0,    # queued by drift detection
     "resyncs_scheduled_age": 0,      # queued by periodic age check
     "resyncs_sent": 0,               # actually sent to Kalshi
+    "resyncs_resnapshotted": 0,      # 2026-05-24: tickers re-snapshotted via update_subscription
     "resyncs_rate_limited": 0,       # dropped by per-ticker rate limit
     "cache_writes_skipped_inverted": 0,  # 2026-05-20: write-side drift guard fires
     "bbo_reads_blocked_inverted": 0,     # 2026-05-20: read-side drift guard fires
@@ -478,6 +489,24 @@ async def _send_subscribe(tickers: list[str]) -> None:
         _log_fn(f"kalshi_ws: subscribe send failed: {e}")
 
 
+async def _send_update_subscription(sid, tickers: list, action: str) -> None:
+    """2026-05-24: add_markets/delete_markets on an existing sid. A delete then add forces a
+    fresh orderbook_snapshot (a plain re-subscribe does NOT). Used by the resync worker to
+    repair drifted/inverted books."""
+    global _ws
+    if _ws is None or not tickers or sid is None:
+        return
+    cmd = {
+        "id": _next_cmd_id(),
+        "cmd": "update_subscription",
+        "params": {"sid": sid, "market_tickers": list(tickers), "action": action},
+    }
+    try:
+        await _ws.send(json.dumps(cmd))
+    except Exception as e:
+        _log_fn(f"kalshi_ws: update_subscription({action}) send failed: {e}")
+
+
 async def _send_subscribe_fill() -> None:
     """Subscribe to the private 'fill' channel — pushes our own fills in real-time.
     No per-ticker subscription needed; the channel is account-scoped on the
@@ -548,8 +577,14 @@ async def _resync_worker():
                     _last_resync_ts[tk] = now
             if not batch:
                 continue
-            # Send re-subscribe to trigger fresh snapshots
-            await _send_subscribe(batch)
+            if _RESYNC_VIA_UPDATE_SUB and _orderbook_sid is not None:
+                # 2026-05-24: re-snapshot via update_subscription delete+add on the connection's
+                # orderbook sid (a plain re-subscribe is a no-op -> no snapshot -> never repairs).
+                await _send_update_subscription(_orderbook_sid, batch, "delete_markets")
+                await _send_update_subscription(_orderbook_sid, batch, "add_markets")
+                _bump("resyncs_resnapshotted", len(batch))
+            else:
+                await _send_subscribe(batch)   # legacy fallback (no-op on Kalshi)
             _bump("resyncs_sent", len(batch))
         except asyncio.CancelledError:
             return
@@ -562,7 +597,7 @@ async def _resync_worker():
 
 
 async def _ws_main():
-    global _ws
+    global _ws, _orderbook_sid
     import websockets
 
     backoff = _RECONNECT_INITIAL_S
@@ -600,6 +635,7 @@ async def _ws_main():
                 _ws = ws
                 _log_fn("kalshi_ws: connected")
                 backoff = _RECONNECT_INITIAL_S
+                _orderbook_sid = None   # per-connection sid; recaptured from the subscribed ack
                 # Re-subscribe to private fill channel on every (re)connect.
                 # Idempotent and cheap. Done first so any pending fills land.
                 await _send_subscribe_fill()
@@ -628,8 +664,10 @@ async def _ws_main():
                             # bot's check_order_fill(). Cached by order_id.
                             _record_fill(body)
                         elif mtype == "subscribed":
-                            # Optional: log first time only to avoid spam
-                            pass
+                            # 2026-05-24: capture the connection's single orderbook_delta sid
+                            # so the resync worker can re-snapshot via update_subscription.
+                            if body.get("channel") == "orderbook_delta" and body.get("sid") is not None:
+                                _orderbook_sid = body.get("sid")
                         elif mtype == "error":
                             _log_fn(f"kalshi_ws: server error: {msg}")
                             _bump("errors")
