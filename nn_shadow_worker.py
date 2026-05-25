@@ -846,6 +846,11 @@ def _try_auto_execute(cand, packet: dict, decision: dict,
     # books -> phantom MTM). Shadow-eval still logs; HIGH unaffected.
     if series == "LOW" and not getattr(_cfg, "AUTO_EXEC_LOW_ENABLED", True):
         return False, "low_auto_exec_paused"
+    # 2026-05-25: HIGH BUY_YES PAUSED -- backtest 5/19-5/23 (n=22) shows it is a
+    # structural loser (36% win, -20% ROI) vs HIGH BUY_NO (the edge). lift +$27,
+    # helps:hurts 14:8. Shadow-eval still logs; HIGH BUY_NO + LOW probe unaffected.
+    if series == "HIGH" and direction == "BUY_YES" and not getattr(_cfg, "AUTO_EXEC_HIGH_YES_ENABLED", True):
+        return False, "high_buy_yes_paused"
     # (2) Decision window — peak-relative per (station, month, series)
     in_win, win_dbg = _in_decision_window(cand.station, series, local_hour, cand.climate_day)
     if not in_win:

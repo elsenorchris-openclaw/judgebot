@@ -391,6 +391,21 @@ near the bracket -> boundary YES bets (the 5/23 MIA B87-88 YES coin-flip). Sweep
 DFW/PHX/PHL: DFW/PHL DROPPED (DFW worse under the thin-margin gate; PHL overfit zigzag), PHX
 HELD (NO-only ~even). Reversible: restore `(1.5, -1.0)`.
 
+## Pause HIGH BUY_YES (structural losing side) — 2026-05-25
+
+Backtest on the faithful settled pool 5/19-5/23 (n=22): **HIGH BUY_YES is 36% win,
+-20% ROI** -- a structural loser, vs HIGH BUY_NO (the bot's actual edge, the larger
+book). Pausing it: lift **+$27**, helps:hurts **14:8**. New flag
+`AUTO_EXEC_HIGH_YES_ENABLED=False` + a gate in `_try_auto_execute` (mirrors the LOW
+pause). HIGH BUY_NO and the LOW $1 probe are unaffected; shadow-eval still logs.
+
+Two sibling candidates were backtested and **held** (failed the helps:hurts bar):
+gap ceiling (~1.3:1, hurts 5/20, lift concentrated on the 5/22 sizing-disasters that
+the cap already addresses) and one-bet-per-station (1.13:1 -- drops about as many
+winners as losers). Note: even applying all three leaves the settled pool net-negative
+(-$12 from -$110) -- these reduce the bleed, they don't create an edge. The real fix
+is a sharper mu; the matcher's +/-1-3F error is too coarse for 1F-wide brackets.
+
 ## Matcher obs fix: feed hourly_history (the dead hourly_obs_today key) — 2026-05-24
 
 The k-NN matcher's trajectory builder read `hourly_obs_today` from the wethr cache, but

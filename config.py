@@ -491,6 +491,7 @@ SHADOW_NN_EVENT_DRIVEN: bool = True
 AUTO_EXECUTE_BUY_NO_PUSH: bool = True
 AUTO_EXECUTE_BUY_YES_PUSH: bool = True
 AUTO_EXEC_LOW_ENABLED: bool = True    # 2026-05-23 (Chris): ON as a $1 live probe (max_bet_low_series_usd=1, deep-pre-min window). Backtest: LOW BUY_NO loses crossing the wide spread; probe tests if live execution differs. Set False to re-pause.
+AUTO_EXEC_HIGH_YES_ENABLED: bool = False  # 2026-05-25 (Chris): PAUSE HIGH BUY_YES. Backtest 5/19-5/23 n=22: 36% win, -20% ROI (vs HIGH BUY_NO the edge). lift +$27, helps:hurts 14:8. Set True to re-enable.
 
 # 2026-05-24: LOW posting probe. When True, LOW push buys POST a maker limit at
 # MID (round((bid+ask)/2)) and REST it (async-adopted on fill) instead of crossing
