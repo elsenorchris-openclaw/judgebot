@@ -846,6 +846,16 @@ PUSH_NO_MU_BOUNDARY_BAND_BY_STATION: dict = {
     # KDCA, KDEN, KLAS, KMDW, KMIA, KMSP, KMSY, KNYC, KOKC, KPHL, KPHX, KSAT
 }
 
+# 2026-05-26: HIGH BUY_NO σ floor -- skip the bet when matcher's sigma_chosen
+# is below this threshold (matcher overconfidence regime). 5/23-5/24 deep-dive:
+# bad-day losers had σ avg 1.65 vs good-day winners 1.79; σ < 1.0 specifically
+# isolates the extreme-overconfidence tail. Of 9 bad-day losers, the boundary
+# band catches 3 and this σ floor catches an additional 2, with 0 false-positive
+# winners caught at 1.0 in the 8-day sample. Set 0.0 to disable. Complements
+# PUSH_SKIP_NO_MU_NEAR_BRACKET (boundary band) -- together they cover both
+# "μ near boundary" AND "matcher overconfident outside boundary" failure modes.
+PUSH_HIGH_NO_MIN_SIGMA_F: float = 1.0
+
 # 2026-05-21: LOW cold-front gate ("Tier 1.5"). Distinct from PUSH_MAX_WIND_MPH
 # above (40 mph, both sides, catastrophic). Sustained wind ≥ ~15 kt at an
 # overnight LOW is a frontal / cold-air-advection signature: the nn matcher

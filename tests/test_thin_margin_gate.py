@@ -176,6 +176,39 @@ class TestThinMarginGate(unittest.TestCase):
         self.assertIn("thin_margin_no", reason)
         self.assertIn("band=2.0", reason)
 
+    def test_sigma_floor_blocks_low_sigma(self):
+        """2026-05-26: σ_chosen < PUSH_HIGH_NO_MIN_SIGMA_F (default 1.0) -> SKIP.
+        Use μ=95 far above cap=89 so the boundary gate doesn't fire first, and
+        sigma_chosen=0.8 (below the 1.0 floor) so the σ gate triggers."""
+        cand = _make_candidate("KXHIGHMIA-26MAY26-B88.5", "KMIA",
+                                "KXHIGH", "2026-05-26")
+        packet = _make_packet(95.0)
+        packet["sigma_chosen"] = 0.8
+        executed, reason = self._run(cand, packet, _make_decision("BUY_NO"))
+        self.assertFalse(executed)
+        self.assertIn("sigma_floor_no", reason)
+
+    def test_sigma_floor_allows_high_sigma(self):
+        """σ_chosen >= floor -> NOT gated by the σ floor. μ=95 far outside
+        the boundary band too, so neither gate fires -- trade flows through."""
+        cand = _make_candidate("KXHIGHMIA-26MAY26-B88.5", "KMIA",
+                                "KXHIGH", "2026-05-26")
+        packet = _make_packet(95.0)
+        packet["sigma_chosen"] = 1.5
+        executed, reason = self._run(cand, packet, _make_decision("BUY_NO"))
+        self.assertNotIn("sigma_floor_no", reason)
+
+    def test_sigma_floor_disabled_when_zero(self):
+        """PUSH_HIGH_NO_MIN_SIGMA_F=0 disables the gate even on very low σ."""
+        import config as _cfg
+        cand = _make_candidate("KXHIGHMIA-26MAY26-B88.5", "KMIA",
+                                "KXHIGH", "2026-05-26")
+        packet = _make_packet(95.0)
+        packet["sigma_chosen"] = 0.5
+        with mock.patch.object(_cfg, "PUSH_HIGH_NO_MIN_SIGMA_F", 0.0):
+            executed, reason = self._run(cand, packet, _make_decision("BUY_NO"))
+        self.assertNotIn("sigma_floor_no", reason)
+
 
 if __name__ == "__main__":
     unittest.main()

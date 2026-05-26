@@ -953,6 +953,22 @@ def _try_auto_execute(cand, packet: dict, decision: dict,
                                    f"in[{float(_fl)-_band:.1f},{float(_cp)+_band:.1f}] band={_band:.1f}")
             except (TypeError, ValueError):
                 pass
+    # (2e) HIGH BUY_NO σ floor -- skip when matcher's sigma_chosen is below
+    # the configured threshold (matcher-overconfidence regime). 5/23-5/24
+    # deep-dive: bad-day losers had σ avg 1.65 vs good-day winners 1.79;
+    # σ < 1.0 isolates the extreme tail with 0 false positives in the sample.
+    # Complements (2d) -- together they catch "μ near boundary" + "matcher
+    # confident outside boundary". Applies to B and T HIGH BUY_NO alike.
+    if series == "HIGH" and direction == "BUY_NO":
+        _sig_floor = float(getattr(_cfg, "PUSH_HIGH_NO_MIN_SIGMA_F", 0.0))
+        if _sig_floor > 0:
+            _sig = packet.get("sigma_chosen")
+            if _sig is not None:
+                try:
+                    if float(_sig) < _sig_floor:
+                        return False, f"sigma_floor_no σ={float(_sig):.2f}<{_sig_floor:.2f}"
+                except (TypeError, ValueError):
+                    pass
     if _rt is None:
         return False, "rt_not_initialized"
     # (2b) Tier 1 runtime gates — physics-catastrophic regimes the matcher
