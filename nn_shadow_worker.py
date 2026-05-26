@@ -48,9 +48,9 @@ _mu_nwp_cache: dict = {}  # (station, climate_day) -> (ts, mu_nwp)
 
 
 def _compute_mu_nwp(station: str, climate_day: str):
-    """Independent NWP daily-high (median of the latest NBM/HRRR/ECMWF runs from
-    the shared GRIB cache, via forecast_delta) used by the NWP-agreement gate.
-    Returns None when unavailable (gate then fails open)."""
+    """Independent NWP daily-high (median across NBM/HRRR/ECMWF of each model's
+    MAX over its recent runs, from the shared GRIB cache via forecast_delta) used
+    by the NWP-agreement gate. Returns None when unavailable (gate fails open)."""
     key = (station, climate_day)
     now = time.time()
     c = _mu_nwp_cache.get(key)
@@ -62,11 +62,22 @@ def _compute_mu_nwp(station: str, climate_day: str):
         if tz_name:
             d0 = _dtm.datetime.strptime(climate_day, "%Y-%m-%d").replace(tzinfo=_ZI(tz_name))
             cs = d0.timestamp(); ce = (d0 + _dtm.timedelta(days=1)).timestamp()
-            runs = _fd.get_recent_runs(station, cs, ce, kind="high", n_runs=1)
-            highs = sorted(v[0]["extreme_f"] for v in runs.values()
-                           if v and v[0].get("extreme_f") is not None)
-            if highs:
-                mu = round(highs[len(highs) // 2], 2)
+            # 2026-05-26: take the MAX across the last 6 runs per model, not just the
+            # newest run. A run issued AFTER the local afternoon peak only forecasts
+            # forward into the cooling evening, so its in-window max misses the peak
+            # it already passed -> a systematic cold bias that worsens through the day
+            # (~-2F in the trading window, -8F by evening). Max over recent runs
+            # recovers the peak an earlier run forecast; then median across models.
+            runs = _fd.get_recent_runs(station, cs, ce, kind="high", n_runs=6)
+            per_model = []
+            for entries in runs.values():
+                vals = [e["extreme_f"] for e in entries
+                        if e and e.get("extreme_f") is not None]
+                if vals:
+                    per_model.append(max(vals))
+            if per_model:
+                per_model.sort()
+                mu = round(per_model[len(per_model) // 2], 2)
     except Exception:
         mu = None
     _mu_nwp_cache[key] = (now, mu)

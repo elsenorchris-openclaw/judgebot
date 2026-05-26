@@ -454,8 +454,9 @@ accuracy-heatmap study ("trade only where the matcher is historically accurate")
 ## NWP-agreement gate (HIGH) — 2026-05-25
 
 Skip a HIGH trade when the k-NN analog μ disagrees with an **independent NWP daily-high**
-(median of the latest NBM/HRRR/ECMWF runs from the shared GRIB cache, via `forecast_delta`)
-by more than `MU_AGREEMENT_MAX_DIFF_F` (=2.0°F). Flags: `USE_MU_AGREEMENT_GATE`. Gate in
+(median across NBM/HRRR/ECMWF of each model's MAX over its recent runs, from the shared GRIB
+cache, via `forecast_delta`) by more than `MU_AGREEMENT_MAX_DIFF_F` (=4.0°F as of 2026-05-26,
+loosened from 2.0 in `4a1551d`). Flags: `USE_MU_AGREEMENT_GATE`. Gate in
 `_try_auto_execute` (HIGH only); **fail-open** if μ_nwp is unavailable. μ_nwp + disagreement
 are logged to the shadow log and appended to the Discord buy message.
 
@@ -470,6 +471,20 @@ Caveats: n=53 backtest (5/19–5/21, the v1max candidate-log window — μ_nwp l
 GRIB cache, ~same NWP); helps:hurts ~1:1 by count but the dollar separation is decisive; it
 still hurts on 5/20 (the one day high-disagreement won). Judge only (not v1max, the frozen
 control). Logs μ_nwp natively now so future backtests don't need the v1max cross-ref.
+
+**2026-05-26 — μ_nwp computation fix (newest-run truncation).** `_compute_mu_nwp` used only the
+*newest* model run's in-window max (`get_recent_runs(n_runs=1)`). A run issued **after** the local
+afternoon peak only forecasts forward into the cooling evening, so its in-window max misses the
+peak it already passed → a systematic **cold bias** that worsens through the day (signed err ~−2°F
+in the trading window, −8°F by evening). Diagnosis: live shadow log (37k records, 05-25/26) shows
+μ_nwp cold at every local hour while k-NN μ is ~unbiased; proven in the raw cache (HRRR KMDW 05-26:
+newest 21Z run = 82.2 with only 3 evening hrs, vs 16Z run = 86.4). **Fix:** take the MAX across the
+last 6 runs per model, then median across models (`n_runs=6`). Measured on retained 05-26 cache vs
+actual high: cold bias −1.96 → **−0.86°F**, mean|err| 2.66 → **2.10**; as-of-time sweep confirms it
+holds flat through the window where the old method drifted cold, and is never worse at any
+(station, hour). Tradeoff: on genuinely hot-model days it runs ~1°F hotter (picks the hottest recent
+run). This shrinks the structural component of `nwp_disagree` so the 4.0°F gate stops over-blocking
+good HIGH trades (at 2.0 it had blocked ~100% of station-days; at 4.0, ~80%).
 
 ## Pause HIGH BUY_YES (structural losing side) — 2026-05-25
 
