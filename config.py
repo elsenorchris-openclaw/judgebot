@@ -513,11 +513,10 @@ PUSH_HIGH_MAX_BET_BY_STATION = {
     # unaffected -- it stays $3 via the PUSH_HIGH_YES_MAX_BET_USD down-size.
     "KBOS": 15.0,
     "KSEA": 15.0,
-    # 2026-05-25 (Chris): SFO re-enabled at $5 (un-benched). The bench was NOT
-    # OOS-robust -- SFO is a sign-FLIP across the early/late split (+8.9c early,
-    # -23.9c late; per-station early-vs-late PnL corr ~0.06), not a structural
-    # -EV edge. $5 = above the $3 default, below the $15 skill tier (probe size).
-    "KSFO": 5.0,
+    # 2026-05-25 (Chris): SFO un-benched and left on the $3 default (no explicit
+    # entry). The bench wasn't OOS-robust -- SFO sign-FLIPS across the early/late
+    # split (+8.9c early, -23.9c late; cross-station PnL corr ~0.06) -- but it's
+    # not a +EV edge either, so it stays at the base $3 size, not the $15 skill tier.
 }
 PUSH_HIGH_NO_BET_BY_STATION = {}  # 2026-05-22 (Chris): removed the $30 MIA-NO carve-out — uniform $15 max for all HIGH now (PUSH_HIGH_MAX_BET_DEFAULT). NO-resize code in nn_shadow_worker stays but is dormant while empty; re-add {station: usd} to size a NO cell up.
 
@@ -618,7 +617,7 @@ PUSH_HIGH_TEMP_WINDOW_BY_STATION = {
     "KPHX": (3.0, -2.5),   # +13c n12 (was 2.0; DEEPER)
     "KSAT": (3.0, -2.5),   # +17c n13 (was 2.0; DEEPER)
     "KSEA": (3.0, -2.5),   # +27c n14 (unchanged; already best)
-    "KSFO": (2.0, -1.5),   # 2026-05-25: re-enabled at $5; global deep window (no +EV last-month slot, so not optimized -- probe only)
+    "KSFO": (2.0, -1.5),   # 2026-05-25: re-enabled at $3 default; global deep window (no +EV last-month slot, not optimized)
 }
 
 # 2026-05-25 (Chris): HIGH stations to BENCH (skip HIGH push auto-exec entirely).
@@ -626,8 +625,8 @@ PUSH_HIGH_TEMP_WINDOW_BY_STATION = {
 # unaffected. Add a station ("KXXX") to bench it; empty = none benched.
 # NB: simply OMITTING a station from PUSH_HIGH_TEMP_WINDOW_BY_STATION does NOT bench
 # it -- it falls back to the global PUSH_HIGH_TEMP_WINDOW window. Benching needs this set.
-# KSFO was benched here 2026-05-25 then RE-ENABLED same day at $5: the bench wasn't
-# OOS-robust (SFO is a sign-flip across the early/late split, not a structural -EV edge).
+# KSFO was benched here 2026-05-25 then RE-ENABLED same day at the $3 default: the bench
+# wasn't OOS-robust (SFO is a sign-flip across the early/late split, not a structural -EV edge).
 PUSH_HIGH_DISABLED_STATIONS = frozenset()
 
 # 2026-05-22: LOW placeholder window (analog to PUSH_HIGH_TEMP_WINDOW). The
