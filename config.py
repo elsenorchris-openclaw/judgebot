@@ -526,6 +526,15 @@ MU_AGREEMENT_MAX_DIFF_F: float = 2.0  # disagreement (deg F) above which the HIG
 # mid -- LOW problem is execution, not signal. Measures live fill-rate at mid.
 # LOW-only; HIGH + the cross path are untouched. Set False to revert to crossing.
 PUSH_LOW_POST_AT_MID: bool = True
+# 2026-05-26: resting-order risk mgmt. A LOW maker bid only fills when the
+# market comes DOWN to it (adverse selection); the 120s loop is too slow to
+# cancel before a collapse picks us off, so cap exposure with a NATIVE Kalshi
+# order TTL (expiration_ts) instead of resting GTC. On expiry the model-gated
+# auto-exec re-posts fresh at the live mid (no chasing: edge gate blocks it if
+# the drop was real). post_only guarantees we never cross. 0 = old GTC behavior.
+PUSH_LOW_POST_TTL_S: int = 90
+PUSH_LOW_POST_POST_ONLY: bool = True
+PUSH_LOW_POST_ADVERSE_C: int = 3   # belt: per-cycle early-cancel if our side's mid fell >= this many c below post
 PUSH_HIGH_MAX_BET_DEFAULT: float = 3.0  # 2026-05-25 (Chris): lowered 5->3 for all NON-edge HIGH stations. Only BOS/SEA (the 2 stations that beat the market) are sized up to $15 via PUSH_HIGH_MAX_BET_BY_STATION; every OTHER station uses this $3 default. (Was $5 uniform 5/23; prior 15-station $15-robust set recoverable from commit 66b530e.)
 PUSH_HIGH_MAX_BET_BY_STATION = {
     # 2026-05-25 (Chris): BOS + SEA sized to $15 -- the ONLY two stations whose

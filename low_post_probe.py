@@ -94,6 +94,23 @@ def _mid_post_c(bid_c, ask_c) -> Optional[int]:
     return post if post > 0 else None
 
 
+def _cur_side_mid_c(ticker: str, side: str) -> Optional[int]:
+    """Current MID for the order's side in cents from the WS BBO cache (None if no
+    fresh book). NO mid = 100 - yes_mid. Used to detect an adverse move vs our bid."""
+    bbo = kalshi_ws.get_bbo(ticker)
+    if not bbo:
+        return None
+    try:
+        yb = float(bbo["yes_bid"]) * 100.0
+        ya = float(bbo["yes_ask"]) * 100.0
+    except (KeyError, TypeError, ValueError):
+        return None
+    if yb <= 0 or ya <= 0 or ya <= yb:
+        return None
+    yes_mid = (yb + ya) / 2.0
+    return int(round(yes_mid if side == "yes" else (100.0 - yes_mid)))
+
+
 def place(rt, cand, packet: dict, entry_dec, side: str,
           decision: Optional[dict] = None) -> tuple[bool, str]:
     """Post a maker limit at MID for a LOW buy and register it to rest.
@@ -141,7 +158,11 @@ def place(rt, cand, packet: dict, entry_dec, side: str,
 
     spread_c = ask_c - bid_c
     state.claim_ticker(cand.ticker)
-    resp = kalshi_client.place_buy(cand.ticker, side, cnt, post_c)
+    _ttl = int(getattr(config, "PUSH_LOW_POST_TTL_S", 0) or 0)
+    _exp = (int(time.time()) + _ttl) if _ttl else None
+    resp = kalshi_client.place_buy(
+        cand.ticker, side, cnt, post_c, expiration_ts=_exp,
+        post_only=bool(getattr(config, "PUSH_LOW_POST_POST_ONLY", False)))
     if not resp.get("ok"):
         state.release_ticker(cand.ticker)
         return False, f"low_post_place_fail:{resp.get('error_code')}"
@@ -170,7 +191,7 @@ def place(rt, cand, packet: dict, entry_dec, side: str,
         "order_id": order_id, "ticker": cand.ticker, "side": side,
         "post_c": post_c, "bid_c": bid_c, "ask_c": ask_c, "cross_c": ask_c,
         "spread_c": spread_c, "cnt": cnt, "climate_day": cand.climate_day,
-        "placed_ts": time.time(), "entry_ctx": entry_ctx,
+        "placed_ts": time.time(), "ttl_s": _ttl, "entry_ctx": entry_ctx,
     }
     with _lock:
         rows = _load()
@@ -296,7 +317,47 @@ def sweep(rt) -> None:
                    via="position_fallback")
             done_ids.add(oid)
             continue
-        # 3) Stale: climate day passed -> market closed. Cancel + release.
+        # 3) Intra-day risk mgmt (2026-05-26): native TTL-expiry + adverse-move.
+        #    The order carries a Kalshi expiration_ts, so it auto-cancels after
+        #    ttl_s; drop the expired row so the model-gated auto-exec can re-post
+        #    fresh at the live mid. Also cancel EARLY if our side's mid has fallen
+        #    >= PUSH_LOW_POST_ADVERSE_C below our bid (a collapse picking us off).
+        age_s = time.time() - float(row.get("placed_ts") or time.time())
+        ttl_s = int(row.get("ttl_s") or getattr(config, "PUSH_LOW_POST_TTL_S", 0) or 0)
+        adv = int(getattr(config, "PUSH_LOW_POST_ADVERSE_C", 0) or 0)
+        cur_mid = _cur_side_mid_c(ticker, side) if adv else None
+        adverse = (adv and cur_mid is not None
+                   and (int(row.get("post_c", 0)) - cur_mid) >= adv)
+        expired = bool(ttl_s) and age_s >= ttl_s
+        if adverse or expired:
+            # Cancel on Kalshi regardless: a no-op for a native-TTL order that
+            # already expired; for a pre-fix GTC order (no native expiration) it
+            # removes the still-live resting order so it cannot fill untracked.
+            try:
+                kalshi_client.cancel_order(oid)
+            except Exception:
+                pass
+            try:
+                state.release_ticker(ticker)
+            except Exception:
+                pass
+            try:
+                state.log_decision({"kind": "low_post_cancel", "ticker": ticker,
+                    "side": side, "post_c": row.get("post_c"),
+                    "reason": ("adverse" if adverse else "ttl_expired"),
+                    "cur_mid_c": cur_mid, "rest_s": round(age_s, 1),
+                    "order_id": oid, "ts": time.time()})
+            except Exception:
+                pass
+            if adverse:
+                _discord(f"\U0001F6D1 **LOW-POST ADVERSE-CANCEL** `{ticker}` "
+                         f"{side.upper()} post {row.get('post_c')}c vs mid {cur_mid}c "
+                         f"(rested {age_s:.0f}s)")
+                log.info("LOW-POST ADVERSE-CANCEL %s: post %sc vs mid %sc (%.0fs)",
+                         ticker, row.get("post_c"), cur_mid, age_s)
+            done_ids.add(oid)
+            continue
+        # 4) Stale: climate day passed -> market closed. Cancel + release.
         if str(row.get("climate_day", "")) < today:
             try:
                 kalshi_client.cancel_order(oid)

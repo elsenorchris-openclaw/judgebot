@@ -278,7 +278,8 @@ def _parse_kalshi_error(exc: Exception) -> tuple[str, str]:
     return ("unknown", msg)
 
 
-def place_buy(ticker: str, side: str, count: int, price_cents: int) -> dict:
+def place_buy(ticker: str, side: str, count: int, price_cents: int,
+              expiration_ts: int | None = None, post_only: bool = False) -> dict:
     """Place a limit BUY at price_cents. side ∈ {"yes", "no"}.
 
     Returns a dict {ok, order_id, status, filled, error_code, error_msg}:
@@ -299,6 +300,10 @@ def place_buy(ticker: str, side: str, count: int, price_cents: int) -> dict:
         "count": count,
     }
     body["yes_price" if side == "yes" else "no_price"] = price_cents
+    if expiration_ts:
+        body["expiration_ts"] = int(expiration_ts)
+    if post_only:
+        body["post_only"] = True
 
     if config.DRY_RUN:
         fake = f"DRYRUN-buy-{ticker}-{side}-{int(time.time()*1000)}"
