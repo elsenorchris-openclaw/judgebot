@@ -1641,6 +1641,37 @@ def _evaluate_ticker(ticker: str, trigger: str) -> None:
                         pkt["edge_tilt_scaled_usd"] = _tilt_cap
                         pkt["edge_tilt_pp"] = round(_edge * 100.0, 1)
 
+        # 2026-05-26 (Chris) S3: EDGE-BAND DE-SIZE — the down-side complement of the
+        # tilt above. A FAT edge (>= DESIZE_PP) means the model WILDLY disagrees with the
+        # market, which the deep dive showed is usually our own sigma-overconfidence
+        # (>=35pp edges win ~41% vs ~60% in the 18-26pp band, late half negative). HALVE
+        # those bets -> same expected PnL with ~23% less capital at risk. Skill-sized
+        # stations (base cap > the $3 default, i.e. BOS/SEA) are EXEMPT. Only ever
+        # DECREASES (floored at min_buy so guardrails don't reject). Mutually exclusive
+        # with the up-tilt band. Gated by PUSH_HIGH_EDGE_TILT_ENABLED.
+        if (_is_high_sizing and decision.get("decision") == "BUY_NO"
+                and getattr(_cfg, "PUSH_HIGH_EDGE_TILT_ENABLED", False)):
+            _desize_pp = float(getattr(_cfg, "PUSH_HIGH_EDGE_TILT_DESIZE_PP", 26.0))
+            _desize_mult = float(getattr(_cfg, "PUSH_HIGH_EDGE_TILT_DESIZE_MULT", 0.5))
+            _default_cap = float(getattr(_cfg, "PUSH_HIGH_MAX_BET_DEFAULT", 3.0))
+            _edge = decision.get("edge")
+            _price_c = decision.get("price_c")
+            _is_skill_cap = _high_cap > _default_cap   # BOS/SEA etc. -> exempt
+            if (_edge is not None and _price_c and 0.0 < _desize_mult < 1.0
+                    and not _is_skill_cap and _edge * 100.0 >= _desize_pp):
+                _price_usd = float(_price_c) / 100.0
+                _desize_cap = _high_cap * _desize_mult
+                _cur_qty = decision.get("qty") or 0
+                _new_qty = int(_desize_cap // _price_usd) if _price_usd > 0 else 0
+                # never drop below the min-buy floor (guardrails would reject the bet)
+                if _price_usd > 0 and _new_qty * _price_usd < _min_buy_usd:
+                    _new_qty = int(-(-_min_buy_usd // _price_usd))  # ceil(min_buy/price)
+                if 0 < _new_qty < _cur_qty:
+                    decision["qty"] = _new_qty
+                    decision["size_usd"] = round(_new_qty * _price_usd, 2)
+                    pkt["edge_desize_usd"] = round(_desize_cap, 2)
+                    pkt["edge_desize_pp"] = round(_edge * 100.0, 1)
+
         # 2026-05-25 (Chris): HIGH BUY_YES re-enabled at a reduced $3 cap (weaker
         # side -- backtest 36% win / -20% ROI -- run small). pure_nn_decide sized to
         # _high_cap ($5); cap the qty DOWN so cost <= PUSH_HIGH_YES_MAX_BET_USD.

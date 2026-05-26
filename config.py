@@ -533,10 +533,20 @@ PUSH_HIGH_NO_BET_BY_STATION = {}  # 2026-05-22 (Chris): removed the $30 MIA-NO c
 # min(max_bet_high_series_usd guardrail, base x MULT), so a moderate-edge NO at a $3 station
 # -> $6 and BOS/SEA stay $15; YES untouched. JUDGE-ONLY (v1max frozen). Set
 # PUSH_HIGH_EDGE_TILT_ENABLED False to revert; to restore the old fat tilt set LO=35/HI=101.
+# 2026-05-26 (Chris) S3 add-on: ALSO size DOWN the fat tail. An edge >= DESIZE_PP means the
+# model WILDLY disagrees with the market = usually our own sigma-overconfidence (those bets
+# win ~41% vs ~60% in the reliable band, late half negative), so HALVE them (x DESIZE_MULT) ->
+# SAME expected PnL with ~23% less capital at risk (faithful book ROC 13.5->17.6%, both OOS
+# halves +; May-25 walk-through: fat bets went 2-3, halving them ~flat PnL / -23% capital).
+# Only ever DECREASES (floored at min_buy). Skill-sized stations (base cap > the $3 default =
+# BOS/SEA) are EXEMPT — their $15 is a Brier-skill call, not an edge call. Set DESIZE_MULT >= 1.0
+# to disable the de-size while keeping the up-tilt. JUDGE-ONLY (v1max frozen).
 PUSH_HIGH_EDGE_TILT_ENABLED: bool = True
 PUSH_HIGH_EDGE_TILT_BAND_LO_PP: float = 18.0  # size up a HIGH BUY_NO when its edge is in
 PUSH_HIGH_EDGE_TILT_BAND_HI_PP: float = 26.0  # [LO, HI) pp — the reliable-edge band
-PUSH_HIGH_EDGE_TILT_MULT: float = 2.0         # multiplier on the station base cap, clipped to the guardrail
+PUSH_HIGH_EDGE_TILT_MULT: float = 2.0         # up-multiplier on the station base cap, clipped to the guardrail
+PUSH_HIGH_EDGE_TILT_DESIZE_PP: float = 26.0   # at/above this edge (pp) a HIGH BUY_NO is sized DOWN
+PUSH_HIGH_EDGE_TILT_DESIZE_MULT: float = 0.5  # de-size multiplier on the station base cap (skill stations exempt)
 
 # 2026-05-24 (Chris): per-station LOW BUY_NO size-up. Deep-dive found pooled LOW
 # loses because the matcher's sigma is ~2.75x too small (RMSz 2.69) -> fake NO
