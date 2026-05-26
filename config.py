@@ -513,6 +513,11 @@ PUSH_HIGH_MAX_BET_BY_STATION = {
     # unaffected -- it stays $3 via the PUSH_HIGH_YES_MAX_BET_USD down-size.
     "KBOS": 15.0,
     "KSEA": 15.0,
+    # 2026-05-25 (Chris): SFO re-enabled at $5 (un-benched). The bench was NOT
+    # OOS-robust -- SFO is a sign-FLIP across the early/late split (+8.9c early,
+    # -23.9c late; per-station early-vs-late PnL corr ~0.06), not a structural
+    # -EV edge. $5 = above the $3 default, below the $15 skill tier (probe size).
+    "KSFO": 5.0,
 }
 PUSH_HIGH_NO_BET_BY_STATION = {}  # 2026-05-22 (Chris): removed the $30 MIA-NO carve-out — uniform $15 max for all HIGH now (PUSH_HIGH_MAX_BET_DEFAULT). NO-resize code in nn_shadow_worker stays but is dormant while empty; re-add {station: usd} to size a NO cell up.
 
@@ -591,8 +596,9 @@ PUSH_HIGH_TEMP_WINDOW = (2.0, -1.5)   # (before, after); None=off. 2026-05-23: 3
 PUSH_HIGH_TEMP_WINDOW_BY_STATION = {
     # Defensible ship rule: moved to a new window only where well-supported
     # (n>=8, BOTH date-halves positive, profitable); else kept the prior live
-    # window. c/bet + n are the last-month buy-at-open numbers. KSFO is BENCHED
-    # (PUSH_HIGH_DISABLED_STATIONS below) -- it had no +EV window at any offset.
+    # window. c/bet + n are the last-month buy-at-open numbers. KSFO was benched
+    # 2026-05-25 then RE-ENABLED same day at $5 (the bench wasn't OOS-robust --
+    # SFO flips sign across the early/late split); it uses the global deep window.
     "KATL": (2.0, -1.5),   # +14c n17 (was 3.5; shallower)
     "KAUS": (4.5, -4.0),   # +19c n8  (was 2.5 -5c -> flips +, DEEPER)
     "KBOS": (5.0, -4.5),   # +44c n10 90%WR (was 1.5 +7c; DEEPER, clean monotonic rise)
@@ -612,15 +618,17 @@ PUSH_HIGH_TEMP_WINDOW_BY_STATION = {
     "KPHX": (3.0, -2.5),   # +13c n12 (was 2.0; DEEPER)
     "KSAT": (3.0, -2.5),   # +17c n13 (was 2.0; DEEPER)
     "KSEA": (3.0, -2.5),   # +27c n14 (unchanged; already best)
+    "KSFO": (2.0, -1.5),   # 2026-05-25: re-enabled at $5; global deep window (no +EV last-month slot, so not optimized -- probe only)
 }
 
 # 2026-05-25 (Chris): HIGH stations to BENCH (skip HIGH push auto-exec entirely).
-# Last-month faithful regen found NO +EV window at any 0.5h offset (KSFO: -26c at
-# the live window, negative every slot). Gated in nn_shadow_worker._try_auto_execute
-# as "high_station_benched". LOW is unaffected. Reversible: remove the station.
+# Gated in nn_shadow_worker._try_auto_execute as "high_station_benched". LOW is
+# unaffected. Add a station ("KXXX") to bench it; empty = none benched.
 # NB: simply OMITTING a station from PUSH_HIGH_TEMP_WINDOW_BY_STATION does NOT bench
 # it -- it falls back to the global PUSH_HIGH_TEMP_WINDOW window. Benching needs this set.
-PUSH_HIGH_DISABLED_STATIONS = frozenset({"KSFO"})
+# KSFO was benched here 2026-05-25 then RE-ENABLED same day at $5: the bench wasn't
+# OOS-robust (SFO is a sign-flip across the early/late split, not a structural -EV edge).
+PUSH_HIGH_DISABLED_STATIONS = frozenset()
 
 # 2026-05-22: LOW placeholder window (analog to PUSH_HIGH_TEMP_WINDOW). The
 # MAE-built LOW overrides open too deep pre-min (h2pk>=2.0 = 40% WR in faithful

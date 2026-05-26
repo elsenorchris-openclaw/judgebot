@@ -69,10 +69,15 @@ class TestHighStationBench(unittest.TestCase):
             )
 
     def test_benched_high_station_blocked(self):
-        """KSFO HIGH is benched -> blocked with high_station_benched."""
+        """A station IN PUSH_HIGH_DISABLED_STATIONS -> blocked with high_station_benched.
+        Patches the disabled set so the test verifies the gate MECHANISM independent of
+        live config (KSFO was un-benched 2026-05-25, so don't couple to live state)."""
+        import config
         cand = _make_candidate("KXHIGHSFO-26MAY20-B88.5", "KSFO",
                                "KXHIGH", "2026-05-20")
-        executed, reason = self._run(cand, _make_packet(), _make_decision())
+        with mock.patch.object(config, "PUSH_HIGH_DISABLED_STATIONS",
+                               frozenset({"KSFO"})):
+            executed, reason = self._run(cand, _make_packet(), _make_decision())
         self.assertFalse(executed)
         self.assertIn("high_station_benched", reason)
 
