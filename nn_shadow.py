@@ -349,6 +349,8 @@ def _shadow_nn_proj_inner(packet: dict) -> Optional[dict]:
         "n_neighbors": res.get("n_neighbors_used"),
         "pool_size": res.get("pool_size"),
         "median_delta": res.get("median_delta_f"),
+        "match_dist_mean": res.get("match_dist_mean_f"),
+        "match_dist_min": res.get("match_dist_min_f"),
         "cur_tmpf": res.get("cur_tmpf"),
         "neighbors": res.get("top_neighbors", []),
         "analog_summary": res.get("analog_summary"),

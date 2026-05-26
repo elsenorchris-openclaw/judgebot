@@ -1671,6 +1671,8 @@ def _evaluate_ticker(ticker: str, trigger: str) -> None:
                 "sigma_raw": nn_res.get("sigma_raw"),
                 "sigma_factor": nn_res.get("sigma_factor"),
                 "bias_correction": nn_res.get("bias_correction"),
+                "match_dist_mean": nn_res.get("match_dist_mean"),
+                "match_dist_min": nn_res.get("match_dist_min"),
             },
             "rm": pkt.get("running_min_or_max"),
             "rm_age_sec": (pkt.get("rm_age_max_sec") if cand.series_prefix == "KXHIGH"

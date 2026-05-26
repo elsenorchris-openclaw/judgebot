@@ -635,8 +635,18 @@ def predict(
         sigma_factor = 1.10 if _use_new_agg else 0.85
     sigma_proj_out = sigma_natural * sigma_factor
 
+    # match-distance: feature-space L2 to the k used analogs (how close today's analog
+    # mornings are; distinct from sigma = the spread of their afternoon OUTCOMES). Additive
+    # logging field for backtesting -- nothing reads it for decisions.
+    _md_arr = score[order]
+    _md_arr = _md_arr[np.isfinite(_md_arr)]
+    _match_dist_mean = round(float(np.mean(_md_arr)), 4) if _md_arr.size else None
+    _match_dist_min = round(float(np.min(_md_arr)), 4) if _md_arr.size else None
+
     return {
         "mu_proj_f": round(float(mu_proj), 2),
+        "match_dist_mean_f": _match_dist_mean,
+        "match_dist_min_f": _match_dist_min,
         "sigma_proj_f": round(sigma_proj_out, 2),
         "sigma_raw_f": round(stdev_delta, 2),
         "sigma_natural_f": round(sigma_natural, 2),
