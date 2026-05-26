@@ -138,6 +138,7 @@ A BUY is rejected unless it clears every gate, in execution order:
 | In-bracket tail-bet | if μ sits inside the YES window but the chosen side is the tail (p_chosen < 0.5), require `PUSH_TAIL_BET_MIN_EDGE_PP` (**25 pp**) |
 | Direction toggle | `AUTO_EXECUTE_BUY_{NO,YES}_PUSH` (both **True**) |
 | LOW enabled | `AUTO_EXEC_LOW_ENABLED` (**True** — $1 live probe) |
+| Cell-MAE reliability | skip if the matcher's historical MAE for `(station, season, local_hour, side)` > `PUSH_MAE_GATE_F` (**2.0 °F**) — `cell_mae_table.CELL_MAE`, 2022-2025 OOS, fail-open on unknown cells (`PUSH_MAE_GATE_ENABLED=True`) |
 | Decision window | hour ∈ `[peak−before, peak+after]` (see **Windows**) |
 | HIGH spread | skip if `yes_ask − yes_bid > PUSH_MAX_SPREAD_C_HIGH` (**15 ¢**) — crossing a wide book pays away the edge |
 | HIGH h₂peak | `PUSH_MIN_H_TO_PEAK_HIGH` (**None / disabled** — windows already end ≥ 1 h pre-peak) |
@@ -390,6 +391,31 @@ slots (2.5-3.5h) all win, shallow 0.5h loses (-$3.89). The shallow 1.5h window l
 near the bracket -> boundary YES bets (the 5/23 MIA B87-88 YES coin-flip). Sweep also tested
 DFW/PHX/PHL: DFW/PHL DROPPED (DFW worse under the thin-margin gate; PHL overfit zigzag), PHX
 HELD (NO-only ~even). Reversible: restore `(1.5, -1.0)`.
+
+## Per-cell MAE reliability gate — 2026-05-25
+
+Skip a BUY when the matcher's **historical MAE** for this `(station, season, local_hour,
+side)` cell exceeds `PUSH_MAE_GATE_F` (=2.0°F). The k-NN projection's accuracy varies ~10×
+by cell — e.g. KMSP/KAUS morning HIGH ≈ 5°F MAE (noise) vs KLAS/KMSY/DFW late-afternoon
+HIGH ≈ 0.5°F (sharp). Where MAE is high the edge calc rests on an unreliable μ/σ, so the
+trade is skipped regardless of computed edge. This is the trade-time form of the
+accuracy-heatmap study ("trade only where the matcher is historically accurate").
+
+- **Table**: `cell_mae_table.CELL_MAE` — 1184 cells, built from a 2022-2025 `heating_traces`
+  backtest (`tools/nn_agg_sweep/gen_mae_table.py`, n≥20/cell). Fully **out-of-sample** to
+  2026 live trades. Lookup `cell_mae(station, month, local_hour, side)` strips a K-prefix
+  and maps month→season; **fail-open** (unknown/thin cell → not gated).
+- **Gate**: `nn_shadow_worker._try_auto_execute`, after the NWP-agreement gate. Flags
+  `PUSH_MAE_GATE_ENABLED` / `PUSH_MAE_GATE_F`. Reason string `cell_mae_gate`.
+- **Distinct from `PUSH_MAE_CONF_TIERS`** (which only *shrinks size*) — this **hard-SKIPs**,
+  additive on top of the sizing.
+- **Backtest** (settled 2026-05-14..24, n=315): gating MAE>2.0°F lifts realized P&L
+  **+$23.29** (kept −$118.53 vs ungated −$141.82), robust in **both** date-halves
+  (H1 +$10.93, H2 +$12.36). Sigma calibration was tested first and **rejected** (per-cell,
+  global inflation ×1.2-2.0, and HIGH σ-factor 0.90→1.7 all *hurt* — the BUY_NO
+  miscalibration is a signal-skill limit, not a variance error, so no σ transform separates
+  winners from losers; this hard cell gate does).
+- **Reversible**: `PUSH_MAE_GATE_ENABLED=False`.
 
 ## NWP-agreement gate (HIGH) — 2026-05-25
 

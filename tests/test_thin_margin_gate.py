@@ -61,9 +61,15 @@ class TestThinMarginGate(unittest.TestCase):
     def _run(self, cand, packet, decision, series="HIGH"):
         import paper_judge_bot as pjb
         import kalshi_client
+        import config as _cfg
+        # Isolate the thin-margin mechanism: the per-cell MAE gate (2026-05-25)
+        # sits earlier in the stack and would preempt some (station,hour) cells
+        # (e.g. KDCA MAM h12 MAE 2.47 > 2.0). Disable it here so these cases
+        # exercise the thin-margin gate specifically.
         with mock.patch.object(pjb, "execute_buy", lambda *a, **kw: None), \
              mock.patch.object(kalshi_client, "get_balance_cached",
-                               return_value=100.0):
+                               return_value=100.0), \
+             mock.patch.object(_cfg, "PUSH_MAE_GATE_ENABLED", False):
             return nsw._try_auto_execute(
                 cand, packet, decision, series=series, local_hour=12.0,
             )

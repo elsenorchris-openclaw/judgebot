@@ -896,6 +896,29 @@ def _try_auto_execute(cand, packet: dict, decision: dict,
         _thr = float(getattr(_cfg, "MU_AGREEMENT_MAX_DIFF_F", 2.0))
         if _nd is not None and _nd > _thr:
             return False, f"nwp_disagree {_nd:.1f}F>{_thr:.1f}F (mu_nwp={packet.get('mu_nwp')})"
+    # (2-mae) Per-cell reliability gate. Skip when the matcher's HISTORICAL MAE
+    # for this (station, season, local_hour, side) cell exceeds PUSH_MAE_GATE_F
+    # -- the k-NN projection is provably unreliable there (e.g. KMSP/KAUS morning
+    # HIGH MAE ~5F vs KLAS/KMSY late-afternoon HIGH ~0.5F). Backtest settled
+    # 2026-05-14..24 (n=315): gating MAE>2.0F lifts realized P&L +$23 (both
+    # date-halves +). MAE table (cell_mae_table) is OOS 2022-2025. Distinct from
+    # PUSH_MAE_CONF_TIERS (size shrink); this hard-SKIPs. Fail-OPEN: unknown cell
+    # (n<20/missing) -> not gated. Sigma calibration was tried first + rejected
+    # (variance transforms can't separate the BUY_NO winners/losers; this can).
+    if getattr(_cfg, "PUSH_MAE_GATE_ENABLED", False):
+        _mae_thr = float(getattr(_cfg, "PUSH_MAE_GATE_F", 2.0))
+        _cell_mae = None
+        try:
+            import cell_mae_table as _cmt
+            _mn = int(str(cand.climate_day)[5:7])
+            _cell_mae = _cmt.cell_mae(
+                cand.station, _mn, local_hour,
+                "high" if series == "HIGH" else "low")
+        except Exception:
+            _cell_mae = None
+        if _cell_mae is not None and _cell_mae > _mae_thr:
+            return False, (f"cell_mae_gate {_cell_mae:.2f}F>{_mae_thr:.1f}F "
+                           f"({cand.station}/{series}/h{int(local_hour)})")
     # (2) Decision window — peak-relative per (station, month, series)
     in_win, win_dbg = _in_decision_window(cand.station, series, local_hour, cand.climate_day)
     if not in_win:

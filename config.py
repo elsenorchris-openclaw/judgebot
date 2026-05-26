@@ -737,6 +737,26 @@ USE_TAIL_EMPIRICAL_PYES: bool = True
 # volume while filtering bottom-edge marginal trades.
 PUSH_MIN_EDGE_PP: int = 18  # 2026-05-25 (validated): 12->18. Faithful HIGH backtest n=867 both OOS halves: 12-18pp band = -5.7c/bet; floor 18 lifts total +49->+55, c/bet +5.7->+7.2, both halves up; 20 over-trims. JUDGE-ONLY (v1max frozen).
 
+# 2026-05-25: per-cell reliability trade-enable gate. Skip a BUY when the
+# matcher's HISTORICAL MAE for this (station, season, local_hour, side) cell
+# exceeds PUSH_MAE_GATE_F -- the k-NN projection is provably unreliable there,
+# so the edge calc rests on a bad mu/sigma. This is the trade-time form of the
+# accuracy-heatmap study: trade only where the matcher is historically sharp.
+# DISTINCT from PUSH_MAE_CONF_TIERS (which only SHRINKS size) -- this hard-SKIPs.
+# Additive on top of that sizing (the backtest P&L already reflects the shrink).
+# MAE table: cell_mae_table.CELL_MAE, built from 2022-2025 heating_traces
+# (n>=20/cell, 1184 cells) -- fully out-of-sample to 2026 live trades.
+# Backtest (settled 2026-05-14..24, n=315): gating MAE>2.0F lifts realized P&L
+# +$23.29 (kept -$118.53 vs ungated -$141.82); robust BOTH date-halves
+# (H1 +$10.93, H2 +$12.36). Sigma calibration was tested first and REJECTED
+# (per-cell, global inflation, and HIGH sigma-factor raise all hurt -- the
+# BUY_NO miscalibration is a signal-skill limit, not a variance error, so no
+# sigma transform separates winners from losers; this hard cell gate does).
+# Fail-OPEN: unknown cell (n<20 or not in table) -> NOT gated.
+# Rollback: PUSH_MAE_GATE_ENABLED=False.
+PUSH_MAE_GATE_ENABLED: bool = True
+PUSH_MAE_GATE_F: float = 2.0
+
 # In-bracket tail-bet gate (Gate 2). When the nn mu sits INSIDE the YES window
 # [floor-0.5, cap+0.5) but the bot picks the smaller-mass (tail) side
 # (p_chosen < 0.5), it is betting against its own central estimate for a thin
