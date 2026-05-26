@@ -934,11 +934,11 @@ def _try_auto_execute(cand, packet: dict, decision: dict,
                 return False, f"spread_too_wide {_ya - _yb:.0f}c>{_msp:.0f}c"
     # (2d) HIGH-only thin-margin BUY_NO gate. Skip a B-bracket BUY_NO when the
     # CLI-adjusted forecast (mu - per-station obs->CLI offset) lands INSIDE the
-    # bracket [floor-0.5, cap+0.5] -- shorting a bracket our own mu points into.
-    # Live-era replay: 32% WR / -3.9c, edge-independent, both date-halves; gating
-    # lifts the HIGH push book +7.6c/bet (+$7.9 over the shipped (2t) gate), both
-    # OOS halves +. Complement of USE_TAIL_EMPIRICAL_PYES (deep T-tail). Only
-    # SKIPS (never shifts p_yes) -> distinct from the reverted bias correction.
+    # bracket [floor - band, cap + band] -- shorting a bracket our own mu points
+    # into. Band default 1.5°F (was 0.5°F pre-2026-05-26), per-station override
+    # in PUSH_NO_MU_BOUNDARY_BAND_BY_STATION. Live-era 8-day EXEC pool: widening
+    # from 0.5°F to 1.5°F lifts HIGH BUY_NO from +$8.69 to +$58.45 (lift $+49.76);
+    # per-station tuning lifts further to +$63.79. WR 55%->66% on both pools.
     if series == "HIGH" and direction == "BUY_NO" and getattr(
             _cfg, "PUSH_SKIP_NO_MU_NEAR_BRACKET", False):
         _fl = packet.get("floor"); _cp = packet.get("cap"); _mu = packet.get("mu_chosen")
@@ -946,9 +946,11 @@ def _try_auto_execute(cand, packet: dict, decision: dict,
             try:
                 _off = float(getattr(_cfg, "PUSH_NO_MU_CLI_OFFSET_BY_STATION", {}).get(
                     cand.station, getattr(_cfg, "PUSH_NO_MU_CLI_OFFSET_DEFAULT", 0.5)))
-                if (float(_fl) - 0.5) <= (float(_mu) - _off) <= (float(_cp) + 0.5):
+                _band = float(getattr(_cfg, "PUSH_NO_MU_BOUNDARY_BAND_BY_STATION", {}).get(
+                    cand.station, getattr(_cfg, "PUSH_NO_MU_BOUNDARY_BAND_DEFAULT", 1.5)))
+                if (float(_fl) - _band) <= (float(_mu) - _off) <= (float(_cp) + _band):
                     return False, (f"thin_margin_no mu={float(_mu):.1f}-off{_off:+.1f} "
-                                   f"in[{float(_fl)-0.5:.1f},{float(_cp)+0.5:.1f}]")
+                                   f"in[{float(_fl)-_band:.1f},{float(_cp)+_band:.1f}] band={_band:.1f}")
             except (TypeError, ValueError):
                 pass
     if _rt is None:

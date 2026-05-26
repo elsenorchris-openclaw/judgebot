@@ -822,6 +822,26 @@ PUSH_NO_MU_CLI_OFFSET_BY_STATION: dict = {
     "KPHX": 0.5, "KSAT": -0.3, "KSEA": 0.3, "KSFO": 0.4,
 }
 
+# 2026-05-26: Per-station BOUNDARY BAND for the thin-margin gate above. The
+# shipped gate used a fixed 0.5°F band -- skip when (mu - offset) lands in
+# [floor - 0.5, cap + 0.5]. Live-era 8-day analysis (5/18-5/25 EXEC pool n=93
+# real-money + FIRST counterfactual pool n=181) shows the matcher's residual
+# bias-low μ creates additional boundary risk within ~1.5°F of either edge.
+# Validation: uniform 1.5°F band lifts EXEC HIGH BUY_NO from +$8.69 baseline to
+# +$58.45 (lift +$49.76), WR 55%→66% on both pools; per-station tuning lifts
+# further to +$63.79 (+$55.10). Per-station thresholds set from FIRST-pool
+# subsample stability (≥69% stable runs): stations where matcher is reliable
+# (KATL/KAUS/KDFW/KHOU/KSEA/KSFO) keep the narrow 0.5°F band; high-variance
+# coastal/transitional (KBOS/KLAX) get 2.0°F; rest use DEFAULT 1.5°F.
+PUSH_NO_MU_BOUNDARY_BAND_DEFAULT: float = 1.5
+PUSH_NO_MU_BOUNDARY_BAND_BY_STATION: dict = {
+    "KATL": 0.5, "KAUS": 0.5, "KDFW": 0.5, "KHOU": 0.5,
+    "KSEA": 0.5, "KSFO": 0.5,
+    "KBOS": 2.0, "KLAX": 2.0,
+    # All others use DEFAULT 1.5°F:
+    # KDCA, KDEN, KLAS, KMDW, KMIA, KMSP, KMSY, KNYC, KOKC, KPHL, KPHX, KSAT
+}
+
 # 2026-05-21: LOW cold-front gate ("Tier 1.5"). Distinct from PUSH_MAX_WIND_MPH
 # above (40 mph, both sides, catastrophic). Sustained wind ≥ ~15 kt at an
 # overnight LOW is a frontal / cold-air-advection signature: the nn matcher

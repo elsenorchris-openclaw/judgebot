@@ -137,6 +137,45 @@ class TestThinMarginGate(unittest.TestCase):
                                          _make_decision("BUY_NO"))
         self.assertNotIn("thin_margin_no", reason)
 
+    def test_default_band_widened_to_1_5(self):
+        """2026-05-26: DEFAULT band widened from 0.5°F to 1.5°F. KDCA (no
+        override, uses DEFAULT 1.5°F): offset +0.5, bracket [88,89].
+        mu=87.0 -> adjusted 86.5. Inside [88-1.5, 89+1.5] = [86.5, 90.5] -> BLOCKED.
+        (Under old 0.5°F band [87.5,89.5], 86.5 would have been ALLOWED.)"""
+        cand = _make_candidate("KXHIGHDCA-26MAY26-B88.5", "KDCA",
+                                "KXHIGH", "2026-05-26")
+        executed, reason = self._run(cand, _make_packet(87.0),
+                                     _make_decision("BUY_NO"))
+        self.assertFalse(executed)
+        self.assertIn("thin_margin_no", reason)
+        self.assertIn("band=1.5", reason)
+
+    def test_narrow_band_station_unaffected(self):
+        """KAUS (override band=0.5°F): keeps old narrow behavior so we don't
+        over-filter at hot-inland stations where the matcher is accurate.
+        Offset KAUS = +0.3, bracket [88,89], mu=87.0 -> adjusted 86.7.
+        Band [88-0.5, 89+0.5] = [87.5, 89.5] -> 86.7 BELOW -> ALLOWED.
+        (Under DEFAULT 1.5°F band [86.5,90.5], 86.7 would be BLOCKED.)"""
+        cand = _make_candidate("KXHIGHAUS-26MAY26-B88.5", "KAUS",
+                                "KXHIGH", "2026-05-26")
+        executed, reason = self._run(cand, _make_packet(87.0),
+                                     _make_decision("BUY_NO"))
+        self.assertNotIn("thin_margin_no", reason)
+
+    def test_wide_band_station_more_aggressive(self):
+        """KLAX (override band=2.0°F): catches boundary risk the DEFAULT 1.5°F
+        would miss at high-variance coastal stations. Offset KLAX = -0.1,
+        bracket [88,89], mu=86.2 -> adjusted 86.3. Under 2.0°F band
+        [86.0,91.0] -> 86.3 INSIDE -> BLOCKED.
+        (Under DEFAULT 1.5°F band [86.5,90.5], 86.3 BELOW -> would be ALLOWED.)"""
+        cand = _make_candidate("KXHIGHLAX-26MAY26-B88.5", "KLAX",
+                                "KXHIGH", "2026-05-26")
+        executed, reason = self._run(cand, _make_packet(86.2),
+                                     _make_decision("BUY_NO"))
+        self.assertFalse(executed)
+        self.assertIn("thin_margin_no", reason)
+        self.assertIn("band=2.0", reason)
+
 
 if __name__ == "__main__":
     unittest.main()
