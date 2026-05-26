@@ -1583,19 +1583,23 @@ def _evaluate_ticker(ticker: str, trigger: str) -> None:
                     decision["size_usd"] = round(_new_qty * _price_usd, 2)
                     pkt["no_bet_scaled_usd"] = _no_cap
 
-        # 2026-05-25 (Chris): FAT-EDGE sizing tilt (complement of the 18pp edge floor).
-        # Lean INTO winning fat edges (>= PUSH_HIGH_EDGE_TILT_FAT_PP). HIGH BUY_NO only;
-        # effective cap = min(guardrail, base x MULT) so $3 stations -> $6 and BOS/SEA stay
-        # $15 (15x2 clipped). Only ever INCREASES. Mirrors the NO-resize qty math above and
-        # reuses the existing-cost + MAE-conf-mult logic. Gated by PUSH_HIGH_EDGE_TILT_ENABLED.
+        # 2026-05-26 (Chris): EDGE-BAND sizing tilt (REVERSES the 5/25 fat-edge tilt).
+        # Size up a HIGH BUY_NO only when its edge is in the RELIABLE band [LO, HI) pp.
+        # The deep dive found edge and win-rate INVERSELY related (18-26pp = 60% WR;
+        # >=35pp = 41% WR with the late half negative -- high edge is sigma-overconfidence),
+        # so we lean into the moderate band, not the fat tail. effective cap =
+        # min(guardrail, base x MULT) so $3 stations -> $6 and BOS/SEA stay $15. Only ever
+        # INCREASES. Mirrors the NO-resize qty math above + the existing-cost / MAE-conf-mult
+        # logic. Gated by PUSH_HIGH_EDGE_TILT_ENABLED.
         if (_is_high_sizing and decision.get("decision") == "BUY_NO"
                 and getattr(_cfg, "PUSH_HIGH_EDGE_TILT_ENABLED", False)):
             _tilt_mult = float(getattr(_cfg, "PUSH_HIGH_EDGE_TILT_MULT", 2.0))
-            _fat_pp = float(getattr(_cfg, "PUSH_HIGH_EDGE_TILT_FAT_PP", 35.0))
+            _band_lo = float(getattr(_cfg, "PUSH_HIGH_EDGE_TILT_BAND_LO_PP", 18.0))
+            _band_hi = float(getattr(_cfg, "PUSH_HIGH_EDGE_TILT_BAND_HI_PP", 26.0))
             _edge = decision.get("edge")
             _price_c = decision.get("price_c")
             if (_edge is not None and _price_c and _tilt_mult > 1.0
-                    and _edge * 100.0 >= _fat_pp):
+                    and _band_lo <= _edge * 100.0 < _band_hi):
                 _guard = float(_gr.get("max_bet_high_series_usd", _high_cap))
                 _tilt_cap = min(_guard, _high_cap * _tilt_mult)
                 if _tilt_cap > _high_cap:

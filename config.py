@@ -520,21 +520,23 @@ PUSH_HIGH_MAX_BET_BY_STATION = {
 }
 PUSH_HIGH_NO_BET_BY_STATION = {}  # 2026-05-22 (Chris): removed the $30 MIA-NO carve-out — uniform $15 max for all HIGH now (PUSH_HIGH_MAX_BET_DEFAULT). NO-resize code in nn_shadow_worker stays but is dormant while empty; re-add {station: usd} to size a NO cell up.
 
-# 2026-05-25 (Chris): FAT-EDGE sizing tilt — the complement of the 18pp edge floor.
-# The floor (PUSH_MIN_EDGE_PP=18) drops LOSING thin edges; this leans INTO the WINNING
-# fat ones. Faithful live-era harness (n=618, Jan27-May20, /tmp/size_proposal.py): fat
-# edges >=35pp earn +0.353 roi / +12.8c/bet at the $3 (non-BOS/SEA) stations over n=276
-# — genuinely UNDER-sized at $3 (the fat-edge bucket wins BOTH OOS halves, e+0.18/l+0.59).
-# A x2 tilt: overall ROC 29.9->31.2, PnL $778->$1070, and lifts the weak EARLY half
-# 4.5->8.0; late half ~flat (54.4->53.7, capital-weighting on an already-54% half).
-# HIGH BUY_NO ONLY. Effective cap = min(max_bet_high_series_usd guardrail, base x MULT),
-# so $3 stations -> $6 and BOS/SEA stay $15 (15x2 clipped to the guardrail); YES untouched.
-# Caveats: +32% capital, tail-risk concentration (fat edges = cheap long-shot NO) —
-# bounded by the $15 guardrail + USE_TAIL_EMPIRICAL_PYES. JUDGE-ONLY (v1max frozen).
-# Set PUSH_HIGH_EDGE_TILT_ENABLED False to revert.
+# 2026-05-26 (Chris): EDGE-BAND sizing tilt — size up the band where the model's edge is
+# RELIABLE, not the fat tail. REVERSES the 5/25 fat-edge tilt (commit 5673b63). Deep dive
+# (faithful live-era harness, Mar15-May20, /tmp/edge_diag*.py + sizing_test.py): model edge
+# and win-rate are INVERSELY related (18-26pp = 60% WR / +8.7c/bet; >=35pp = 41% WR /
+# +2.1c/bet with the LATE half NEGATIVE) — high edge is manufactured by an over-tight sigma
+# (overconfidence), so the fattest edges are the LEAST trustworthy. Recalibrating p_yes
+# (sigma-widen OR empirical isotonic) is a WASH (monotone; the 18pp floor already does it),
+# so the lever is SELECTION/SIZING by edge band. Moving the x2 from >=35pp to [18,26)pp:
+# $3-station ROC 1.8->5.2% with BOTH OOS halves turning positive (the >=35pp tilt was
+# early+7.1/late-2.8 = both-halves FAIL). HIGH BUY_NO ONLY. Effective cap =
+# min(max_bet_high_series_usd guardrail, base x MULT), so a moderate-edge NO at a $3 station
+# -> $6 and BOS/SEA stay $15; YES untouched. JUDGE-ONLY (v1max frozen). Set
+# PUSH_HIGH_EDGE_TILT_ENABLED False to revert; to restore the old fat tilt set LO=35/HI=101.
 PUSH_HIGH_EDGE_TILT_ENABLED: bool = True
-PUSH_HIGH_EDGE_TILT_FAT_PP: float = 35.0   # edge (pp) at/above which a HIGH BUY_NO is sized up
-PUSH_HIGH_EDGE_TILT_MULT: float = 2.0      # multiplier on the station base cap, clipped to the guardrail
+PUSH_HIGH_EDGE_TILT_BAND_LO_PP: float = 18.0  # size up a HIGH BUY_NO when its edge is in
+PUSH_HIGH_EDGE_TILT_BAND_HI_PP: float = 26.0  # [LO, HI) pp — the reliable-edge band
+PUSH_HIGH_EDGE_TILT_MULT: float = 2.0         # multiplier on the station base cap, clipped to the guardrail
 
 # 2026-05-24 (Chris): per-station LOW BUY_NO size-up. Deep-dive found pooled LOW
 # loses because the matcher's sigma is ~2.75x too small (RMSz 2.69) -> fake NO
