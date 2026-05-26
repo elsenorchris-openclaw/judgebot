@@ -518,7 +518,7 @@ AUTO_EXEC_LOW_ENABLED: bool = True    # 2026-05-23 (Chris): originally ON as a $
 AUTO_EXEC_HIGH_YES_ENABLED: bool = True  # 2026-05-25 (Chris): RE-ENABLED at reduced $3 cap (PUSH_HIGH_YES_MAX_BET_USD). Reverses the 077b511 pause (HIGH YES 36% win/-20% ROI) -- small live YES probe. False to re-pause.
 PUSH_HIGH_YES_MAX_BET_USD: float = 3.0  # 2026-05-25 (Chris): HIGH BUY_YES sized DOWN to $3 (NO keeps $5). Applied in nn_shadow_worker after pure_nn_decide.
 USE_MU_AGREEMENT_GATE: bool = True  # 2026-05-25 (Chris): skip HIGH when k-NN mu disagrees with the NBM/HRRR/ECMWF blend by > MU_AGREEMENT_MAX_DIFF_F. Phase-1 5/19-5/21: agree<=2F kept +23% ROI vs disagree>2F -34%. Set False to disable.
-MU_AGREEMENT_MAX_DIFF_F: float = 2.0  # disagreement (deg F) above which the HIGH trade is skipped (robust plateau 1.75-2.25).
+MU_AGREEMENT_MAX_DIFF_F: float = 4.0  # 2026-05-26 (Chris): loosened 2.0->4.0. At 2.0 the gate blocked ~100% of HIGH exec on 2026-05-26 (matcher ran +2..+6F above the NWP blend on a hot day where NWP was running LOW; rm already exceeded NWP pre-peak on DFW/OKC/DEN/SFO/LAX). 2.0 was too tight for a low-NWP regime. Paired with the rm carve-out in nn_shadow_worker (don't veto when rm>=mu_nwp). disagreement (deg F) above which the HIGH trade is skipped.
 
 # 2026-05-24: LOW posting probe. When True, LOW push buys POST a maker limit at
 # MID (round((bid+ask)/2)) and REST it (async-adopted on fill) instead of crossing

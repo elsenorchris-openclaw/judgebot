@@ -905,7 +905,22 @@ def _try_auto_execute(cand, packet: dict, decision: dict,
         _nd = packet.get("nwp_disagree")
         _thr = float(getattr(_cfg, "MU_AGREEMENT_MAX_DIFF_F", 2.0))
         if _nd is not None and abs(_nd) > _thr:
-            return False, f"nwp_disagree |{_nd:+.1f}F|>{_thr:.1f}F (mu_nwp={packet.get('mu_nwp')})"
+            # 2026-05-26 (rm carve-out): if today's actual high SO FAR (rm) has
+            # already reached/exceeded the NWP forecast, the NWP blend is
+            # PROVABLY too low and must not veto an even-higher matcher mu. This
+            # fires only when the matcher is the HOTTER side (mu >= rm by the
+            # physical max-floor in nn_match_fast), so it does NOT weaken the
+            # symmetric gate's matcher-COLDER-than-NWP protection. Diagnosed
+            # 2026-05-26: a low-NWP hot day where rm beat the NWP forecast
+            # pre-peak on DFW/OKC/DEN/SFO/LAX while the 2.0F gate blocked 100%.
+            _rm = packet.get("running_min_or_max")
+            _mn = packet.get("mu_nwp")
+            _nwp_proven_low = (_rm is not None and _mn is not None
+                               and float(_rm) >= float(_mn))
+            if _nwp_proven_low:
+                packet["nwp_gate_rm_override"] = True
+            else:
+                return False, f"nwp_disagree |{_nd:+.1f}F|>{_thr:.1f}F (mu_nwp={packet.get('mu_nwp')})"
     # (2-mae) Per-cell reliability gate. Skip when the matcher's HISTORICAL MAE
     # for this (station, season, local_hour, side) cell exceeds PUSH_MAE_GATE_F
     # -- the k-NN projection is provably unreliable there (e.g. KMSP/KAUS morning
