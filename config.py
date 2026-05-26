@@ -53,9 +53,33 @@ MODE: str = "trader"
 DRY_RUN: bool = False
 
 ENABLE_BUYS: bool = True
-ENABLE_SELLS: bool = False   # Bot may exit its OWN positions (opened_by=paper-judge).
-                            # Origin-tag guard in run_exit_loop prevents touching
-                            # V2-max / V2-min positions on the shared wallet.
+ENABLE_SELLS: bool = True    # 2026-05-26: enabled SOLELY for the adverse-drift exit
+                            # (the dormant LLM run_exit_loop stays OFF via
+                            # ENABLE_LLM_EXIT_LOOP=False below). Origin-tag guard
+                            # in execute_sell prevents touching V2-max / V2-min
+                            # positions on the shared wallet.
+
+# 2026-05-26: keep the dormant LLM-era exit loop (run_exit_loop) OFF even though
+# ENABLE_SELLS is now True. Sells are gated to the adverse-drift exit ONLY.
+ENABLE_LLM_EXIT_LOOP: bool = False
+
+# 2026-05-26: adverse-drift stop-loss (the ONLY sell path). The market corrects
+# against a losing position within ~30-60 min of entry (informed order flow,
+# measured: positions where the held-side bid drifts >X against us settle ~14-30%
+# vs ~69% when it drifts toward us). Exit when the held-side BID falls >=
+# ADVERSE_DRIFT_EXIT_PP cents below its entry-time value, SUSTAINED for
+# ADVERSE_DRIFT_SUSTAIN_MIN minutes (filters momentary dip-and-recover whipsaws),
+# within ADVERSE_DRIFT_WINDOW_MIN of entry. Conservative variant (10c/60m/sustain15).
+# Backtest settled 2026-05-14..24 (n=258): hold -$174.71 -> exit -$151.17
+# (+$23.54, both date-halves +, whipsaw ~-$1.0). May-25 MTM +$5.05. Sells at the
+# bid (crosses spread); only fires on positions opened by paper-judge that have a
+# recorded entry baseline (entry_bid_c) -- pre-existing open positions hold to
+# settlement as before. Rollback: ENABLE_ADVERSE_DRIFT_EXIT=False (and optionally
+# ENABLE_SELLS=False to fully re-disable selling).
+ENABLE_ADVERSE_DRIFT_EXIT: bool = True
+ADVERSE_DRIFT_EXIT_PP: int = 10        # held-side bid must fall this many cents
+ADVERSE_DRIFT_WINDOW_MIN: int = 60     # only watch the first 60 min after entry
+ADVERSE_DRIFT_SUSTAIN_MIN: int = 15    # breach must persist this long before exit
 
 
 # ─────────────────────────────────────────────────────────────────────────────

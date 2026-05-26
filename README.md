@@ -29,7 +29,9 @@
   stack of gates passes, places a **real Kalshi order** via
   `paper_judge_bot.execute_buy`. Every decision is logged to
   `data/shadow_nn_strategy.jsonl`.
-- **No LLM in the trade loop. No selling — positions are held to settlement.**
+- **No LLM in the trade loop.** Selling is enabled for **one mechanism only** — the
+  **adverse-drift exit** (2026-05-26); the dormant LLM exit loop stays off. Positions
+  with no recorded entry baseline still hold to settlement.
 - **Mode:** `MODE="trader"` on the shared **v2 / account-2** Kalshi wallet (co-exists
   with the V2-max and V2-min bots).
 
@@ -202,7 +204,9 @@ is disabled (∞). `check_sell` is intentionally weaker but moot while
 | `MODE` | `trader` | executes orders (`observer_only` = scan/log only; `killed` = nothing) |
 | `DRY_RUN` | `False` | real Kalshi POSTs |
 | `ENABLE_BUYS` | `True` | |
-| `ENABLE_SELLS` | `False` | bot holds to settlement; exit loop skipped |
+| `ENABLE_SELLS` | `True` | enabled SOLELY for the adverse-drift exit; LLM `run_exit_loop` gated off by `ENABLE_LLM_EXIT_LOOP=False` |
+| `ENABLE_LLM_EXIT_LOOP` | `False` | dormant LLM exit loop stays off despite `ENABLE_SELLS=True` |
+| `ENABLE_ADVERSE_DRIFT_EXIT` | `True` | the only sell path (see Adverse-drift exit section) |
 | `LLM_DISPATCH_MODE` | `off` | LLM never dispatched — push worker owns trades |
 | `SHADOW_NN_EVENT_DRIVEN` | `True` | the push worker is the trading engine |
 | `AUTO_EXECUTE_BUY_{NO,YES}_PUSH` | `True` | |
@@ -391,6 +395,36 @@ slots (2.5-3.5h) all win, shallow 0.5h loses (-$3.89). The shallow 1.5h window l
 near the bracket -> boundary YES bets (the 5/23 MIA B87-88 YES coin-flip). Sweep also tested
 DFW/PHX/PHL: DFW/PHL DROPPED (DFW worse under the thin-margin gate; PHL overfit zigzag), PHX
 HELD (NO-only ~even). Reversible: restore `(1.5, -1.0)`.
+
+## Adverse-drift exit (stop-loss) — 2026-05-26
+
+The **only sell path**. The market corrects against a losing position within ~30-60 min
+of entry (informed order flow — measured: positions whose held-side bid drifts against us
+settle ~14-30%, vs ~69% when it drifts toward us). The matcher's own probability is
+calibrated unconditionally, so this adverse drift — not any pre-entry signal — is the
+cleanest indicator that the market knows something we don't.
+
+- **Rule** (`nn_shadow_worker._check_adverse_drift_exit`, runs on each BBO event before
+  entry): if we hold a **paper-judge** position whose held-side **BID** has fallen
+  ≥ `ADVERSE_DRIFT_EXIT_PP` (10c) below its entry baseline (`entry_bid_c`, recorded at
+  fill), **sustained** for ≥ `ADVERSE_DRIFT_SUSTAIN_MIN` (15min), within
+  `ADVERSE_DRIFT_WINDOW_MIN` (60min) of entry → **sell at the current bid** via
+  `execute_sell`. The sustain window filters momentary dip-and-recover whipsaws.
+- **Scope guards**: only positions opened by paper-judge with a recorded `entry_bid_c`
+  (pre-2026-05-26 open positions hold to settlement); foreign-bot positions untouched;
+  bid must be in [1,99]; sells via the mature `execute_sell` (re-runs `check_sell`).
+  After a sell, evaluation returns early (no same-event re-buy); the 30-min rebuy
+  cooldown prevents churn.
+- **Why a dedicated flag**: `ENABLE_SELLS=True` is required for `check_sell` to pass, but
+  the dormant LLM `run_exit_loop` is held off by `ENABLE_LLM_EXIT_LOOP=False`. This exit
+  is the sole seller.
+- **Backtest** (settled 2026-05-14..24, n=258, conservative 10c/60m/sustain15):
+  hold −$174.71 → exit −$151.17 (**+$23.54**, robust BOTH date-halves, whipsaw ~−$1.0).
+  May-25 MTM check: +$5.05. Aggressive (8c/60m no-sustain) was +$70 but whipsaw −$14;
+  chose conservative for near-zero winner-whipsaw.
+- **Caveat**: backtest fills at the logged bid (+2c slippage tested); live fills in thin
+  weather books may differ. **Rollback**: `ENABLE_ADVERSE_DRIFT_EXIT=False` (and/or
+  `ENABLE_SELLS=False`).
 
 ## Per-cell MAE reliability gate — 2026-05-25
 

@@ -3985,6 +3985,12 @@ def execute_buy(rt: Runtime, cand: market_universe.Candidate,
     # (which buys would have been profitable, what gap_pp distribution etc.).
     _, model_prob = _extract_prob_from_read(decision.read, prefer_side=decision.decision)
     gap_pp_buy = _gap_pp(model_prob, ask_c) if model_prob is not None else None
+    # 2026-05-26: held-side BID at entry — baseline for the adverse-drift exit
+    # (the worker measures how far the bid drifts below this). Only positions
+    # carrying this field are eligible for the drift exit; pre-existing open
+    # positions (no baseline) hold to settlement as before.
+    _entry_bid_c = (packet.get("no_bid_c") if decision.decision == "BUY_NO"
+                    else packet.get("yes_bid_c"))
     rec = {
         "ts": rt.ctx.now_utc,
         "kind": "entry",
@@ -3999,6 +4005,9 @@ def execute_buy(rt: Runtime, cand: market_universe.Candidate,
         "label": cand.city_code,
         "floor": cand.floor,
         "cap": cand.cap,
+        # Adverse-drift exit baseline (held-side bid + entry epoch).
+        "entry_bid_c": _entry_bid_c,
+        "entry_ts_epoch": rt.ctx.now_utc,
         # Origin tag — used by exit loop to refuse selling another bot's position.
         "opened_by": "paper-judge",
         # Series + bracket kind + market price + extracted prob + gap.
@@ -4385,7 +4394,10 @@ def one_cycle(rt: Runtime) -> None:
     )
     if rt.ctx.mode == "killed":
         return
-    if config.ENABLE_SELLS:
+    # 2026-05-26: ENABLE_SELLS is True only for the adverse-drift exit (in the
+    # push worker). The dormant LLM-era run_exit_loop stays OFF unless its own
+    # flag is set — re-enabling sells must NOT silently revive it.
+    if config.ENABLE_SELLS and getattr(config, "ENABLE_LLM_EXIT_LOOP", False):
         try:
             run_exit_loop(rt)
         except Exception:

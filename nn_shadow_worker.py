@@ -111,6 +111,11 @@ _t_bracket_cache_lock = threading.Lock()
 # Shared with the bot via start(rt)
 _rt = None
 
+# 2026-05-26: adverse-drift exit — per-ticker sustained-breach state.
+# ticker -> epoch when the held-side bid first fell >= ADVERSE_DRIFT_EXIT_PP
+# below its entry baseline. Reset when the bid recovers above the threshold.
+_drift_breach: dict = {}
+
 # Telemetry
 _stats = {
     "ws_callbacks_received": 0,
@@ -1428,6 +1433,71 @@ def _build_shadow_packet(cand: market_universe.Candidate) -> Optional[dict]:
 # ─────────────────────────────────────────────────────────────────────────────
 # Single-ticker evaluation (the shared path used by both triggers)
 # ─────────────────────────────────────────────────────────────────────────────
+def _check_adverse_drift_exit(cand, pkt) -> bool:
+    """Adverse-drift stop-loss (the ONLY sell path). If we hold a paper-judge
+    position on this ticker whose held-side BID has drifted >= ADVERSE_DRIFT_EXIT_PP
+    cents below its entry baseline AND stayed there >= ADVERSE_DRIFT_SUSTAIN_MIN
+    minutes (within ADVERSE_DRIFT_WINDOW_MIN of entry), sell at the current bid.
+    Returns True if a sell was placed (caller should stop evaluating this ticker).
+
+    Mechanism: the market corrects against a losing position within ~30-60 min
+    (informed order flow). The sustain window filters momentary dip-and-recover
+    whipsaws. Sells at the bid (crosses the spread). Only acts on positions with
+    a recorded entry_bid_c baseline (entered after 2026-05-26)."""
+    if not getattr(_cfg, "ENABLE_ADVERSE_DRIFT_EXIT", False):
+        return False
+    if _rt is None or not hasattr(_rt, "positions"):
+        return False
+    pos = (_rt.positions or {}).get(cand.ticker)
+    if not pos or pos.get("opened_by") != "paper-judge":
+        return False
+    base = pos.get("entry_bid_c"); ets = pos.get("entry_ts_epoch")
+    if base is None or ets is None:
+        return False  # pre-baseline position → hold to settlement
+    cnt = pos.get("count") or 0
+    if cnt <= 0:
+        return False
+    now = time.time()
+    win_min = float(getattr(_cfg, "ADVERSE_DRIFT_WINDOW_MIN", 60))
+    if (now - float(ets)) > win_min * 60:
+        _drift_breach.pop(cand.ticker, None)
+        return False  # past the watch window → hold
+    action = pos.get("action")
+    held_bid = pkt.get("no_bid_c") if action == "BUY_NO" else pkt.get("yes_bid_c")
+    if held_bid is None or held_bid < 1 or held_bid > 99:
+        return False  # no sane bid to sell into
+    X = float(getattr(_cfg, "ADVERSE_DRIFT_EXIT_PP", 10))
+    sustain_min = float(getattr(_cfg, "ADVERSE_DRIFT_SUSTAIN_MIN", 15))
+    if held_bid <= float(base) - X:
+        bs = _drift_breach.get(cand.ticker)
+        if bs is None:
+            _drift_breach[cand.ticker] = now
+            return False  # first breach — start the sustain clock
+        if (now - bs) < sustain_min * 60:
+            return False  # breached but not yet sustained
+        # Sustained adverse drift → SELL at the current bid.
+        import paper_judge_bot as _pjb
+        import judgment as _jd
+        dec = _jd.ExitDecision(
+            decision="SELL_ALL", sell_count=int(cnt),
+            limit_price_cents=int(held_bid), conviction=0.90,
+            read=(f"adverse-drift exit: {action} held_bid {held_bid}c <= "
+                  f"entry_bid {base}c - {X:.0f}c, sustained {sustain_min:.0f}m"),
+            regret_check=("market drifted against position post-entry "
+                          "(informed-flow signal); cutting per validated stop"))
+        try:
+            _pjb.execute_sell(_rt, cand.ticker, pos, pkt, dec)
+        except Exception:
+            log.exception("adverse-drift exit sell failed for %s", cand.ticker)
+            return False
+        _drift_breach.pop(cand.ticker, None)
+        _bump("adverse_drift_exits")
+        return True
+    else:
+        _drift_breach.pop(cand.ticker, None)  # recovered → reset the clock
+        return False
+
+
 def _evaluate_ticker(ticker: str, trigger: str) -> None:
     """Build packet → run nn_shadow → run pure_nn_decide → log. Idempotent
     under the per-ticker lock + debounce."""
@@ -1454,6 +1524,12 @@ def _evaluate_ticker(ticker: str, trigger: str) -> None:
         _bump("evals_total")
         pkt = _build_shadow_packet(cand)
         if pkt is None:
+            return
+
+        # 2026-05-26: adverse-drift exit runs FIRST. If we hold a position on
+        # this ticker and it sold, stop here (do not fall through to entry —
+        # avoids a same-event re-buy of what we just sold).
+        if _check_adverse_drift_exit(cand, pkt):
             return
 
         # Tag the packet with its matched push override (window + bias + mae).
