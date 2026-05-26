@@ -453,6 +453,15 @@ accuracy-heatmap study ("trade only where the matcher is historically accurate")
 
 ## NWP-agreement gate (HIGH) — 2026-05-25
 
+> **DISABLED 2026-05-26 (`USE_MU_AGREEMENT_GATE=False`).** A faithful BUY_NO PnL backtest
+> (n=170, 04-27→05-21, both date-halves; tool `/tmp/gate_pnl_bt.py`) showed the gate is
+> net-negative in **every** form: NO-gate **+1124c** vs live@4.0 **+704c** vs old@2.0 **−89c**.
+> High matcher↔NWP disagreement = matcher running hot = **fat edge = our most profitable
+> independent bets**; the gate removed net *winners* (the old @2.0 setting cut +1213c of
+> winning bets). Our edge is our **independence** from the NWP/market consensus, not agreement
+> with it. The gate code remains intact (flag-gated) for re-enable; the description below is
+> retained for that case. See `project_nwp_gate_suppressing_judge_high_20260526` memory.
+
 Skip a HIGH trade when the k-NN analog μ disagrees with an **independent NWP daily-high**
 (median across NBM/HRRR/ECMWF of each model's MAX over its recent runs, from the shared GRIB
 cache, via `forecast_delta`) by more than `MU_AGREEMENT_MAX_DIFF_F` (=4.0°F as of 2026-05-26,

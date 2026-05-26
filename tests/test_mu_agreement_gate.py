@@ -59,14 +59,18 @@ class TestMuAgreementGate(unittest.TestCase):
         nsw._rt = self._orig_rt
         nsw._in_decision_window = self._orig_window
 
-    def _run(self, cand, packet, decision, series="HIGH"):
+    def _run(self, cand, packet, decision, series="HIGH", gate=True):
+        # gate=True pins USE_MU_AGREEMENT_GATE on so these tests exercise the gate
+        # logic regardless of the shipped default (disabled 2026-05-26). Pass
+        # gate=False to test the bypass path.
         import paper_judge_bot as pjb
         import kalshi_client
         import config as _cfg
         with mock.patch.object(pjb, "execute_buy", lambda *a, **kw: None), \
              mock.patch.object(kalshi_client, "get_balance_cached",
                                return_value=100.0), \
-             mock.patch.object(_cfg, "PUSH_MAE_GATE_ENABLED", False):
+             mock.patch.object(_cfg, "PUSH_MAE_GATE_ENABLED", False), \
+             mock.patch.object(_cfg, "USE_MU_AGREEMENT_GATE", gate):
             return nsw._try_auto_execute(
                 cand, packet, decision, series=series, local_hour=12.0,
             )
@@ -115,13 +119,11 @@ class TestMuAgreementGate(unittest.TestCase):
 
     def test_gate_disabled_flag(self):
         """USE_MU_AGREEMENT_GATE=False bypasses the gate entirely."""
-        import config as _cfg
         cand = _make_candidate("KXHIGHMIA-26MAY26-B85.5", "KMIA",
                                 "KXHIGH", "2026-05-26",
                                 floor=85.0, cap=86.0)
-        with mock.patch.object(_cfg, "USE_MU_AGREEMENT_GATE", False):
-            executed, reason = self._run(cand, _make_packet(95.0, 80.0, floor=85.0, cap=86.0),
-                                         _make_decision("BUY_NO"))
+        executed, reason = self._run(cand, _make_packet(95.0, 80.0, floor=85.0, cap=86.0),
+                                     _make_decision("BUY_NO"), gate=False)
         self.assertNotIn("nwp_disagree", reason)
 
     def test_low_series_not_affected(self):
