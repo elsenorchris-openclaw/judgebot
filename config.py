@@ -372,7 +372,7 @@ GUARDRAILS = {
     # 2026-05-20: raised 10 -> 15 so HIGH-series BUY_YES can reach the new $15
     # HIGH cap (guardrails REJECTS, not truncates, when cost > side_cap, so a
     # $15-sized HIGH YES would otherwise be killed by the old $10 YES cap).
-    # LOW BUY_YES is unaffected — it stays capped at $5 by max_bet_low_series_usd.
+    # LOW BUY_YES is unaffected — it's capped by max_bet_low_series_usd (currently $3).
     "max_bet_yes_usd": 15.0,
     # 2026-05-16: HIGH-series brackets (KXHIGH-*) capped tighter after a string
     # of forecast-anchored BUY_NO losses (HOU B88.5, MIN B80.5, NY B78.5, LV B95.5).
@@ -391,7 +391,7 @@ GUARDRAILS = {
     # smaller LOW min-buy (PUSH_MIN_BUY_USD_LOW) into pure_nn_decide so the
     # integer-contract math doesn't collapse the way $5/$5 did on 2026-05-17
     # (min_buy == series_cap => no integer qty fits => all LOW buys skip).
-    "max_bet_low_series_usd": 1.0,  # 2026-05-23 (Chris): $1 LOW max -- LOW auto-exec back ON as a $1 live probe (backtest: crossing the wide LOW spread loses; this tests live execution).
+    "max_bet_low_series_usd": 3.0,  # 2026-05-26: bumped 1->3 (3x harvest) after live validation of the PUSH_LOW_POST_AT_MID probe. n=11 fills over 2 days at $1: +$3.72 realized (+$0.34/trade), 85% fill rate, +~11c/contract -- matches the +11.7c posted-at-mid backtest mechanism. Per-trade absolute risk small; LOW BUY_YES (previously the cross-loser) flipped to +$4.31/7 in the probe sample as expected (cheaper entry post-at-mid changes EV sign). KDEN BUY_NO B-bracket stays at $10 via PUSH_LOW_NO_BET_BY_STATION; all other LOW (incl. BUY_YES any station, T tails) lifts from $1 to $3.
     # Legacy single-cap field — kept for any reader unaware of side-specific
     # caps. Set to the higher of the two so generic checks don't false-positive.
     "max_bet_usd": 30.0,
@@ -490,7 +490,7 @@ SHADOW_NN_EVENT_DRIVEN: bool = True
 # Direction toggles ON — pure-code architecture per Chris 2026-05-19.
 AUTO_EXECUTE_BUY_NO_PUSH: bool = True
 AUTO_EXECUTE_BUY_YES_PUSH: bool = True
-AUTO_EXEC_LOW_ENABLED: bool = True    # 2026-05-23 (Chris): ON as a $1 live probe (max_bet_low_series_usd=1, deep-pre-min window). Backtest: LOW BUY_NO loses crossing the wide spread; probe tests if live execution differs. Set False to re-pause.
+AUTO_EXEC_LOW_ENABLED: bool = True    # 2026-05-23 (Chris): originally ON as a $1 live probe; 2026-05-26 bumped to $3 (max_bet_low_series_usd=3) after probe validated +11c/contract live (matched +11.7c backtest). Deep-pre-min window. Set False to re-pause.
 AUTO_EXEC_HIGH_YES_ENABLED: bool = True  # 2026-05-25 (Chris): RE-ENABLED at reduced $3 cap (PUSH_HIGH_YES_MAX_BET_USD). Reverses the 077b511 pause (HIGH YES 36% win/-20% ROI) -- small live YES probe. False to re-pause.
 PUSH_HIGH_YES_MAX_BET_USD: float = 3.0  # 2026-05-25 (Chris): HIGH BUY_YES sized DOWN to $3 (NO keeps $5). Applied in nn_shadow_worker after pure_nn_decide.
 USE_MU_AGREEMENT_GATE: bool = True  # 2026-05-25 (Chris): skip HIGH when k-NN mu disagrees with the NBM/HRRR/ECMWF blend by > MU_AGREEMENT_MAX_DIFF_F. Phase-1 5/19-5/21: agree<=2F kept +23% ROI vs disagree>2F -34%. Set False to disable.
@@ -544,8 +544,9 @@ PUSH_HIGH_EDGE_TILT_MULT: float = 2.0      # multiplier on the station base cap,
 # in BOTH date halves on B brackets (NYC +8.0/+7.7c n=45, DEN +4.3/+16.1c n=30;
 # T-tail brackets are NOT validated, n=6). So size up ONLY the validated subset:
 # {station} BUY_NO on B brackets -> this cap; everything else (LOW YES, T tails,
-# all other stations) stays at GUARDRAILS.max_bet_low_series_usd ($1). Applied in
-# low_post_probe.place() (LOW posts at MID, doesn't cross). Empty {} = uniform $1.
+# all other stations) stays at GUARDRAILS.max_bet_low_series_usd ($3 as of 2026-05-26;
+# was $1 probe). Applied in low_post_probe.place() (LOW posts at MID, doesn't cross).
+# Empty {} = uniform $3 base cap.
 PUSH_LOW_NO_BET_BY_STATION = {"KDEN": 10.0}  # 2026-05-24 (Claude review): KNYC HELD -- independent faithful backtest shows NYC LOW-NO early-half NEGATIVE (-7.5c; net +8c but not robustly both-halves on my split). DEN robust both halves (+32.7/+25.6c). Re-add "KNYC": 10.0 after reconciling methodology (NO-only? RMSz).
 
 # 2026-05-21: the push decision window comes SOLELY from the per-(station,
@@ -768,11 +769,12 @@ PUSH_MAE_GATE_F: float = 2.0
 PUSH_TAIL_BET_MIN_EDGE_PP: int = 25
 
 # LOW-series per-bet min-buy floor for the push sizer. 2026-05-21: when LOW was
-# cut to a $1 cap (max_bet_low_series_usd), the default $1 min-buy equals the
-# cap and the integer-contract math collapses (no qty satisfies both cost >= $1
-# floor AND cost <= $1 cap except exact-divisor prices), which would silently
-# skip nearly all LOW buys. This lower floor lets LOW place genuine ~$0.40-$1.00
-# bets. HIGH keeps the standard $1 min-buy (its $15 cap never binds on min-buy).
+# cut to a $1 cap (max_bet_low_series_usd), the default $1 min-buy equaled the
+# cap and the integer-contract math collapsed (no qty satisfied both cost >= $1
+# floor AND cost <= $1 cap except at exact-divisor prices), which would silently
+# skip nearly all LOW buys. This lower floor lets LOW place genuine ~$0.40-$3.00
+# bets (cap is now $3 as of 2026-05-26; floor stays $0.40 to preserve range).
+# HIGH keeps the standard $1 min-buy (its $15 cap never binds on min-buy).
 PUSH_MIN_BUY_USD_LOW: float = 0.40
 
 # Entry-price guardrails (cents). Skip if the ask we'd pay is outside [floor, ceil].
