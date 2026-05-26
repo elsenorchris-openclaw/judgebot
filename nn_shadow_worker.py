@@ -1558,6 +1558,39 @@ def _evaluate_ticker(ticker: str, trigger: str) -> None:
                     decision["size_usd"] = round(_new_qty * _price_usd, 2)
                     pkt["no_bet_scaled_usd"] = _no_cap
 
+        # 2026-05-25 (Chris): FAT-EDGE sizing tilt (complement of the 18pp edge floor).
+        # Lean INTO winning fat edges (>= PUSH_HIGH_EDGE_TILT_FAT_PP). HIGH BUY_NO only;
+        # effective cap = min(guardrail, base x MULT) so $3 stations -> $6 and BOS/SEA stay
+        # $15 (15x2 clipped). Only ever INCREASES. Mirrors the NO-resize qty math above and
+        # reuses the existing-cost + MAE-conf-mult logic. Gated by PUSH_HIGH_EDGE_TILT_ENABLED.
+        if (_is_high_sizing and decision.get("decision") == "BUY_NO"
+                and getattr(_cfg, "PUSH_HIGH_EDGE_TILT_ENABLED", False)):
+            _tilt_mult = float(getattr(_cfg, "PUSH_HIGH_EDGE_TILT_MULT", 2.0))
+            _fat_pp = float(getattr(_cfg, "PUSH_HIGH_EDGE_TILT_FAT_PP", 35.0))
+            _edge = decision.get("edge")
+            _price_c = decision.get("price_c")
+            if (_edge is not None and _price_c and _tilt_mult > 1.0
+                    and _edge * 100.0 >= _fat_pp):
+                _guard = float(_gr.get("max_bet_high_series_usd", _high_cap))
+                _tilt_cap = min(_guard, _high_cap * _tilt_mult)
+                if _tilt_cap > _high_cap:
+                    _price_usd = float(_price_c) / 100.0
+                    _rem_tilt = _tilt_cap
+                    if _rt is not None:
+                        try:
+                            _pos = _rt.positions.get(ticker) if hasattr(_rt, "positions") else None
+                            if _pos:
+                                _rem_tilt = max(0.0, _tilt_cap - float(_pos.get("cost", 0)))
+                        except Exception:
+                            pass
+                    _rem_tilt *= _conf_mult
+                    _new_qty = int(min(_tilt_cap, _rem_tilt) // _price_usd) if _price_usd > 0 else 0
+                    if _new_qty > (decision.get("qty") or 0):
+                        decision["qty"] = _new_qty
+                        decision["size_usd"] = round(_new_qty * _price_usd, 2)
+                        pkt["edge_tilt_scaled_usd"] = _tilt_cap
+                        pkt["edge_tilt_pp"] = round(_edge * 100.0, 1)
+
         # 2026-05-25 (Chris): HIGH BUY_YES re-enabled at a reduced $3 cap (weaker
         # side -- backtest 36% win / -20% ROI -- run small). pure_nn_decide sized to
         # _high_cap ($5); cap the qty DOWN so cost <= PUSH_HIGH_YES_MAX_BET_USD.
