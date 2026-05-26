@@ -891,11 +891,16 @@ def _try_auto_execute(cand, packet: dict, decision: dict,
     # days; the independent NBM/HRRR/ECMWF mu does not. Skip when they disagree by
     # more than MU_AGREEMENT_MAX_DIFF_F. Phase-1 5/19-5/21: agree<=2F kept +23%
     # ROI vs disagree>2F -34%. Fail-OPEN: if mu_nwp unavailable, do not gate.
+    # 2026-05-26: SYMMETRIC -- gate now fires on |disagree| > thr (was: only
+    # positive direction). 5/23-5/24 calibration-failure deep-dive: matcher
+    # UNDER-predicted highs (matcher p_yes=20% vs actual yes_rate=75%), so the
+    # bad-day signature was matcher COLDER than NWP, not hotter. One-sided gate
+    # would have missed it. Symmetric form catches both regimes.
     if series == "HIGH" and getattr(_cfg, "USE_MU_AGREEMENT_GATE", False):
         _nd = packet.get("nwp_disagree")
         _thr = float(getattr(_cfg, "MU_AGREEMENT_MAX_DIFF_F", 2.0))
-        if _nd is not None and _nd > _thr:
-            return False, f"nwp_disagree {_nd:.1f}F>{_thr:.1f}F (mu_nwp={packet.get('mu_nwp')})"
+        if _nd is not None and abs(_nd) > _thr:
+            return False, f"nwp_disagree |{_nd:+.1f}F|>{_thr:.1f}F (mu_nwp={packet.get('mu_nwp')})"
     # (2-mae) Per-cell reliability gate. Skip when the matcher's HISTORICAL MAE
     # for this (station, season, local_hour, side) cell exceeds PUSH_MAE_GATE_F
     # -- the k-NN projection is provably unreliable there (e.g. KMSP/KAUS morning
