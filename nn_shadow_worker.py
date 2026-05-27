@@ -1005,6 +1005,23 @@ def _try_auto_execute(cand, packet: dict, decision: dict,
                         return False, f"sigma_floor_no σ={float(_sig):.2f}<{_sig_floor:.2f}"
                 except (TypeError, ValueError):
                     pass
+
+    # (2f) HIGH BUY_NO σ ceiling -- mirror of (2e) at the opposite tail: skip
+    # when sigma_chosen is ABOVE threshold (low-confidence / wide-analog regime,
+    # matcher unsure the high won't reach the bracket -> shorting unreliable).
+    # Real-trade validation (judge+v1max actual n=165, 2026-05-15..25): sigma>2.5
+    # BUY_NO 25%WR -$2.14/bet, negative BOTH date-halves AND both bots; skip lifts
+    # the BUY_NO book +$34. Complements the fit-quality (stdev_delta) gate. 0=off.
+    if series == "HIGH" and direction == "BUY_NO":
+        _sig_ceil = float(getattr(_cfg, "PUSH_HIGH_NO_MAX_SIGMA_F", 0.0))
+        if _sig_ceil > 0:
+            _sig = packet.get("sigma_chosen")
+            if _sig is not None:
+                try:
+                    if float(_sig) > _sig_ceil:
+                        return False, f"sigma_ceiling_no σ={float(_sig):.2f}>{_sig_ceil:.2f}"
+                except (TypeError, ValueError):
+                    pass
     if _rt is None:
         return False, "rt_not_initialized"
     # (2b) Tier 1 runtime gates — physics-catastrophic regimes the matcher

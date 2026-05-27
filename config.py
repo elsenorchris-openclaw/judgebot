@@ -899,6 +899,13 @@ PUSH_NO_MU_BOUNDARY_BAND_BY_STATION: dict = {
 # "μ near boundary" AND "matcher overconfident outside boundary" failure modes.
 PUSH_HIGH_NO_MIN_SIGMA_F: float = 1.0
 
+# 2026-05-27: HIGH BUY_NO σ CEILING -- skip when matcher sigma_chosen is ABOVE
+# this (low-confidence / wide-analog-cluster regime). Real-trade validation
+# (judge+v1max actual trades n=165, 2026-05-15..25): sigma>2.5 BUY_NO 25%WR
+# -$2.14/bet, negative BOTH date-halves AND both bots; skipping lifts the BUY_NO
+# book +$34. Opposite-tail mirror of PUSH_HIGH_NO_MIN_SIGMA_F above. 0 = off.
+PUSH_HIGH_NO_MAX_SIGMA_F: float = 2.5
+
 # 2026-05-21: LOW cold-front gate ("Tier 1.5"). Distinct from PUSH_MAX_WIND_MPH
 # above (40 mph, both sides, catastrophic). Sustained wind ≥ ~15 kt at an
 # overnight LOW is a frontal / cold-air-advection signature: the nn matcher
