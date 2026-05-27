@@ -3739,6 +3739,14 @@ def execute_buy(rt: Runtime, cand: market_universe.Candidate,
             return
 
         target_cost = side_cap * decision.size_factor
+        # 2026-05-27 SIZING FIX: honor the worker's intended de-sized/per-station size
+        # (push auto-exec sets packet["push_target_usd"] = decision["size_usd"], which
+        # already bakes in PUSH_HIGH_MAX_BET_BY_STATION + up-tilt + fat-edge de-size).
+        # Without this, target_cost = $15 x size_factor discarded all of that and every
+        # HIGH bet sized to the $15 backstop. Capped by side_cap; absent on LLM path.
+        _push_tgt = packet.get("push_target_usd")
+        if _push_tgt is not None and float(_push_tgt) > 0:
+            target_cost = min(side_cap, float(_push_tgt))
         scout = _scout_sweep_plan(
             ticker=cand.ticker, side=side, claude_prob=scout_prob,
             target_cost=target_cost, floor_cost=min_buy,

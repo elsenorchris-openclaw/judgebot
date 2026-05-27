@@ -1200,6 +1200,13 @@ def _try_auto_execute(cand, packet: dict, decision: dict,
         import judgment
         edge = decision.get("edge") or 0.0
         size_factor = min(1.0, max(0.30, edge / 0.20))
+        # 2026-05-27 SIZING FIX: execute_buy sizes target_cost = side_cap($15) x
+        # size_factor, which DISCARDED the worker's per-station cap + up-tilt +
+        # fat-edge de-size (all of which live in decision["size_usd"]/qty). Result:
+        # every HIGH bet executed at ~$15 (e.g. KLAS B90.5 5/26: decided $1.40 de-sized,
+        # executed $15.33). Pass the intended de-sized size so execute_buy honors it
+        # (capped by the $15 backstop). Push-path only; LLM/other paths unaffected.
+        packet["push_target_usd"] = decision.get("size_usd")
         entry_dec = judgment.EntryDecision(
             decision=direction,
             conviction=0.85,
