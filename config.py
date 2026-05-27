@@ -514,7 +514,7 @@ SHADOW_NN_EVENT_DRIVEN: bool = True
 # Direction toggles ON — pure-code architecture per Chris 2026-05-19.
 AUTO_EXECUTE_BUY_NO_PUSH: bool = True
 AUTO_EXECUTE_BUY_YES_PUSH: bool = True
-AUTO_EXEC_LOW_ENABLED: bool = True    # 2026-05-23 (Chris): originally ON as a $1 live probe; 2026-05-26 bumped to $3 (max_bet_low_series_usd=3) after probe validated +11c/contract live (matched +11.7c backtest). Deep-pre-min window. Set False to re-pause.
+AUTO_EXEC_LOW_ENABLED: bool = False   # 2026-05-27 (Chris): OFF -- judge low side handed to min_bot_jua on the v2 wallet. Was True ($3 probe since 05-23). Set True to restore.
 AUTO_EXEC_HIGH_YES_ENABLED: bool = True  # 2026-05-25 (Chris): RE-ENABLED at reduced $3 cap (PUSH_HIGH_YES_MAX_BET_USD). Reverses the 077b511 pause (HIGH YES 36% win/-20% ROI) -- small live YES probe. False to re-pause.
 PUSH_HIGH_YES_MAX_BET_USD: float = 3.0  # 2026-05-25 (Chris): HIGH BUY_YES sized DOWN to $3 (NO keeps $5). Applied in nn_shadow_worker after pure_nn_decide.
 USE_MU_AGREEMENT_GATE: bool = False  # 2026-05-26 (Chris): DISABLED. Faithful BUY_NO PnL backtest (n=170, 04-27..05-21, both halves) shows the gate is net-negative in EVERY form: NO-gate +1124c vs live@4.0 +704c vs old@2.0 -89c. High matcher<->NWP disagreement = matcher-HOT = fat-edge = our PROFITABLE INDEPENDENT bets; the gate removed net WINNERS (old@2.0 removed +1213c of winners). Our edge IS independence from the NWP/market consensus, not agreement with it. Tool /tmp/gate_pnl_bt.py. Set True to re-enable (rm carve-out + MU_AGREEMENT_MAX_DIFF_F below then apply again).
