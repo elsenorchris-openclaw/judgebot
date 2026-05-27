@@ -535,7 +535,7 @@ PUSH_LOW_POST_AT_MID: bool = True
 PUSH_LOW_POST_TTL_S: int = 90
 PUSH_LOW_POST_POST_ONLY: bool = True
 PUSH_LOW_POST_ADVERSE_C: int = 3   # belt: per-cycle early-cancel if our side's mid fell >= this many c below post
-PUSH_HIGH_MAX_BET_DEFAULT: float = 3.0  # 2026-05-25 (Chris): lowered 5->3 for all NON-edge HIGH stations. Only BOS/SEA (the 2 stations that beat the market) are sized up to $15 via PUSH_HIGH_MAX_BET_BY_STATION; every OTHER station uses this $3 default. (Was $5 uniform 5/23; prior 15-station $15-robust set recoverable from commit 66b530e.)
+PUSH_HIGH_MAX_BET_DEFAULT: float = 6.0  # 2026-05-27 (Chris): raised 3->6 default for all NON-edge HIGH stations (now actually takes effect post sizing-fix c75c032). Only BOS/SEA stay $15 via PUSH_HIGH_MAX_BET_BY_STATION. NOTE cascade (edge-band sizes relative to this): reliable 18-26pp up-tilt -> min($15, 6*2)=$12; fat >=26pp de-size -> 6*0.5=$3. (3->6 on 5/27; was 5->3 on 5/25; $5 uniform 5/23; 15-station $15-robust set in commit 66b530e.)
 PUSH_HIGH_MAX_BET_BY_STATION = {
     # 2026-05-25 (Chris): BOS + SEA sized to $15 -- the ONLY two stations whose
     # matcher actually beats the market on Brier (last-month, h2pk 2-5: BOS
