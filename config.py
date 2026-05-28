@@ -404,7 +404,7 @@ GUARDRAILS = {
     # 2026-05-20: raised 5 -> 15 (Chris directive). HIGH is the profitable book
     # (+$40 on 5/20 vs LOW -$24); lean bet size into it. pure_nn_decide sizing
     # reads this same value via the worker so qty is sized to match the cap.
-    "max_bet_high_series_usd": 15.0,  # 2026-05-25 (Chris): raised 5->15 as the BACKSTOP ceiling for the per-station BOS/SEA $15 sizing (the only 2 stations we beat the market on, Brier +8-12%). Per-bet size is set by PUSH_HIGH_MAX_BET_BY_STATION (BOS/SEA=$15) / PUSH_HIGH_MAX_BET_DEFAULT ($5 for all others); this guardrail only REJECTS bets ABOVE 15, it does NOT raise anyone's size.
+    "max_bet_high_series_usd": 20.0,  # 2026-05-28 (Chris): raised 15->20 to match BOS/SEA skill tier raise to $20. Backstop ceiling for per-station sizing -- REJECTS bets above this. Was $15 since 2026-05-25 (matched BOS/SEA=$15 then).
     # 2026-05-16 (evening): LOW-series brackets (KXLOW-*) capped at $5 alongside
     # HIGH while validating the nn_match k-NN heating-curve projector as the
     # primary μ source. Symmetric to max_bet_high_series_usd; applied at
@@ -516,7 +516,7 @@ AUTO_EXECUTE_BUY_NO_PUSH: bool = True
 AUTO_EXECUTE_BUY_YES_PUSH: bool = True
 AUTO_EXEC_LOW_ENABLED: bool = False   # 2026-05-27 (Chris): OFF -- judge low side handed to min_bot_jua on the v2 wallet. Was True ($3 probe since 05-23). Set True to restore.
 AUTO_EXEC_HIGH_YES_ENABLED: bool = True  # 2026-05-25 (Chris): RE-ENABLED at reduced $3 cap (PUSH_HIGH_YES_MAX_BET_USD). Reverses the 077b511 pause (HIGH YES 36% win/-20% ROI) -- small live YES probe. False to re-pause.
-PUSH_HIGH_YES_MAX_BET_USD: float = 3.0  # 2026-05-25 (Chris): HIGH BUY_YES sized DOWN to $3 (NO keeps $5). Applied in nn_shadow_worker after pure_nn_decide.
+PUSH_HIGH_YES_MAX_BET_USD: float = 6.0  # 2026-05-28 (Chris): raised 3->6 after 5/27 +$105 combined day where HIGH YES winners hit the $3 cap (judge MIA YES +$4.27; v1max MSP/DCA/MIA/AUS/MSY YES winners netted +$45+). Tracks ~60% of the NO default ($10 via PUSH_HIGH_MAX_BET_DEFAULT). False AUTO_EXEC_HIGH_YES_ENABLED to re-pause.
 USE_MU_AGREEMENT_GATE: bool = False  # 2026-05-26 (Chris): DISABLED. Faithful BUY_NO PnL backtest (n=170, 04-27..05-21, both halves) shows the gate is net-negative in EVERY form: NO-gate +1124c vs live@4.0 +704c vs old@2.0 -89c. High matcher<->NWP disagreement = matcher-HOT = fat-edge = our PROFITABLE INDEPENDENT bets; the gate removed net WINNERS (old@2.0 removed +1213c of winners). Our edge IS independence from the NWP/market consensus, not agreement with it. Tool /tmp/gate_pnl_bt.py. Set True to re-enable (rm carve-out + MU_AGREEMENT_MAX_DIFF_F below then apply again).
 MU_AGREEMENT_MAX_DIFF_F: float = 4.0  # 2026-05-26 (Chris): loosened 2.0->4.0. At 2.0 the gate blocked ~100% of HIGH exec on 2026-05-26 (matcher ran +2..+6F above the NWP blend on a hot day where NWP was running LOW; rm already exceeded NWP pre-peak on DFW/OKC/DEN/SFO/LAX). 2.0 was too tight for a low-NWP regime. Paired with the rm carve-out in nn_shadow_worker (don't veto when rm>=mu_nwp). disagreement (deg F) above which the HIGH trade is skipped.
 
@@ -544,8 +544,8 @@ PUSH_HIGH_MAX_BET_BY_STATION = {
     # stay $5 via PUSH_HIGH_MAX_BET_DEFAULT (unchanged). Requires the guardrail
     # max_bet_high_series_usd=15 (backstop) or these get rejected. HIGH YES is
     # unaffected -- it stays $3 via the PUSH_HIGH_YES_MAX_BET_USD down-size.
-    "KBOS": 15.0,
-    "KSEA": 15.0,
+    "KBOS": 20.0,
+    "KSEA": 20.0,
     # 2026-05-25 (Chris): SFO un-benched and left on the $3 default (no explicit
     # entry). The bench wasn't OOS-robust -- SFO sign-FLIPS across the early/late
     # split (+8.9c early, -23.9c late; cross-station PnL corr ~0.06) -- but it's
