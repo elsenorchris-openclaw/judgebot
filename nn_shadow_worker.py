@@ -1082,6 +1082,12 @@ def _try_auto_execute(cand, packet: dict, decision: dict,
     if direction == "BUY_YES":
         min_c = int(getattr(_cfg, "PUSH_MIN_ENTRY_C_BUY_YES",
                             getattr(_cfg, "PUSH_MIN_ENTRY_C", 25)))
+    elif cand.series_prefix == "KXLOW":
+        # 2026-05-28 (Chris): the 50c BUY_NO floor (PUSH_MIN_ENTRY_C) is a HIGH-book
+        # finding; applied to the LOW book it inverts (hurts PnL), so LOW uses its
+        # own lower floor (PUSH_MIN_ENTRY_C_LOW=10 = pre-e5d6e01 behaviour).
+        min_c = int(getattr(_cfg, "PUSH_MIN_ENTRY_C_LOW",
+                            getattr(_cfg, "PUSH_MIN_ENTRY_C", 10)))
     else:
         min_c = int(getattr(_cfg, "PUSH_MIN_ENTRY_C", 10))
     ask_c = packet.get("yes_ask_c") if direction == "BUY_YES" else packet.get("no_ask_c")

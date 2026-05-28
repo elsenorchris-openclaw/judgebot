@@ -545,7 +545,12 @@ PUSH_HIGH_MAX_BET_BY_STATION = {
     # max_bet_high_series_usd=15 (backstop) or these get rejected. HIGH YES is
     # unaffected -- it stays $3 via the PUSH_HIGH_YES_MAX_BET_USD down-size.
     "KBOS": 20.0,
-    "KSEA": 20.0,
+    # 2026-05-28 (Chris): KSEA $20 carve-out REMOVED -> SEA now falls to the $10
+    # PUSH_HIGH_MAX_BET_DEFAULT. The BOS/SEA up-size was justified by a Brier
+    # claim, but realized SETTLED FILLS contradict it for SEA: KSEA -$38.92 /
+    # 28.6%WR / ROI -54% across all fills (-$10.76 even restricted to post-50c-
+    # floor HIGH). Sizing SEA UP is contradicted by the money. BOS kept (only
+    # n=2 post-floor, uninformative -> no evidence against it; revisit later).
     # 2026-05-25 (Chris): SFO un-benched and left on the $3 default (no explicit
     # entry). The bench wasn't OOS-robust -- SFO sign-FLIPS across the early/late
     # split (+8.9c early, -23.9c late; cross-station PnL corr ~0.06) -- but it's
@@ -829,6 +834,7 @@ PUSH_MIN_BUY_USD_LOW: float = 0.40
 # MTM −$0.13/$). Cheap YES = market consensus near-zero; nn overconfident on tails.
 PUSH_MIN_ENTRY_C: int = 50           # 2026-05-28: REVERTED 30->50. Real fills (trades.jsonl n=142): <50c BLED -$182 (32%WR), >=50c +$37 (69%WR), 40-50c -$78. My 30c was an EVAL_PASS ARTIFACT (last-gate-row backed-out price drifts toward outcome). Real entry-price = ground truth. Original 50c (e5d6e01) is correct.
 PUSH_MIN_ENTRY_C_BUY_YES: int = 30   # BUY_YES needs >= 30c (raised from 25 per 2026-05-20 sweep — filters cheap-YES lottery)
+PUSH_MIN_ENTRY_C_LOW: int = 10       # 2026-05-28 (Chris): BUY_NO floor for the LOW book ONLY. The 50c PUSH_MIN_ENTRY_C is a HIGH-book finding (real fills); applied GLOBALLY it inverted on LOW — LOW NO went -$16.75 -> -$20.48 under the 50c floor (n=57). Restore LOW to its pre-e5d6e01 10c floor (HIGH-only floor). LOW remains net-negative overall = separate strategic question, not solved here.
 PUSH_MAX_ENTRY_C: int = 80
 
 # Tier 1 runtime gates — physics-catastrophic conditions where the nn matcher

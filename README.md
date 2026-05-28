@@ -351,6 +351,30 @@ from LLM-first to pure-code push is in the change log below.
 
 # Change log (newest first)
 
+## BUY_NO floor made HIGH-only (LOW reverts to 10c) + SEA $20 carve-out removed — 2026-05-28
+
+Two evidence-driven fixes (Chris-approved) that REMOVE harm rather than add gates. Both
+from a settled-fill deep-dive (FILL pool = truth per RULE#2; eval prices are slippage-
+optimistic and were the source of two earlier mistakes).
+
+1. **NO floor is now HIGH-only.** `PUSH_MIN_ENTRY_C=50` (the BUY_NO price floor) was applied
+   GLOBALLY by the worker (no series branch), so it also gated the LOW book — where it
+   INVERTS: judge LOW BUY_NO is net-negative and the 50c floor made it WORSE (LOW -$16.75 ->
+   -$20.48 under the floor, n=57). Added `PUSH_MIN_ENTRY_C_LOW=10` (config) and a
+   `cand.series_prefix == "KXLOW"` branch in `_try_auto_execute` (nn_shadow_worker.py ~1085):
+   HIGH NO keeps the 50c floor, LOW NO reverts to its pre-e5d6e01 10c floor. (LOW is net-
+   negative regardless — "ungated frontier" — a separate strategic question, not solved here.)
+
+2. **KSEA $20 size carve-out removed** -> SEA falls to the $10 `PUSH_HIGH_MAX_BET_DEFAULT`.
+   The BOS/SEA $20 up-size rested on a Brier claim, but realized SETTLED FILLS contradict it
+   for SEA: KSEA -$38.92 / 28.6% WR / ROI -54% across all fills (-$10.76 even post-50c-floor
+   HIGH). Sizing SEA UP is contradicted by the money. KBOS $20 KEPT (only n=2 post-floor,
+   uninformative — no evidence against it; revisit later).
+
+Tests 462 pass / 4 skip. v1max NOT affected (HIGH-only bot, different sizing path, no station
+carve-out). HOLD on all other deep-dive levers (YES edge-floor 18->12, YES sizing, gold-band
+tilt revert, drift-exit port, NO ceiling) — each failed the both-halves holdout or is n<10.
+
 ## REVERT entry-price floor 30c -> 50c (my 30c was an EVAL_PASS artifact) — 2026-05-28
 
 `PUSH_MIN_ENTRY_C` 30 -> 50 (back to e5d6e01). The earlier 50->30 was based on EVAL_PASS
