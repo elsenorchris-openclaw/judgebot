@@ -351,6 +351,17 @@ from LLM-first to pure-code push is in the change log below.
 
 # Change log (newest first)
 
+## HIGH fat-edge de-size trigger raised 26pp -> 35pp — 2026-05-28
+
+`PUSH_HIGH_EDGE_TILT_DESIZE_PP` 26.0 -> 35.0 (Chris-approved, deep-dive 2026-05-28). The
+fat-edge x0.5 de-size was halving the PROFITABLE .26-.35 edge_no band, not just the bad
+.35+ tail. Deep-dive (judge_analysis.sqlite, 05-05..05-22, ~425 settled bets): the .26-.35
+B-bracket cohort is +28c/bet (73% WR), holds both OOS halves (early +28.6c / late +25.9c),
+binomial p<0.0001, leave-one-city-out 24-27c, ~+$261 sized over the window. Now [18,26)
+up-tilts x2, [26,35) sizes at BASE (the fix), >=35pp stays de-sized x0.5 (those win ~41%,
+late-half negative). Keep DESIZE_MULT=0.5; do NOT remove the de-size entirely (full-sizing
+.35+ flips the late half negative -$11.67). Rollback: PUSH_HIGH_EDGE_TILT_DESIZE_PP -> 26.0.
+
 > Historical record. Current behavior is summarized in the reference above; where an
 > entry below conflicts with the reference, **the reference wins** (it reflects the
 > live `config.py`). Notable later reversals: median-bias correction was shipped then
