@@ -827,7 +827,7 @@ PUSH_MIN_BUY_USD_LOW: float = 0.40
 # 2026-05-19 v3: BUY_YES needs a higher floor than BUY_NO. Analysis of 170 shadow
 # decisions showed 0/12 settled wins on BUY_YES at <15c entry (n=52 cohort,
 # MTM −$0.13/$). Cheap YES = market consensus near-zero; nn overconfident on tails.
-PUSH_MIN_ENTRY_C: int = 10           # BUY_NO floor (unchanged)
+PUSH_MIN_ENTRY_C: int = 50           # 2026-05-28 (deep-dive): 10->50 BUY_NO floor. Real pure-nn HIGH BUY_NO n=75/9d: NO entries <50c bled -$107 (price<0.50 ROI -33%/-43% WR .29-.38) while >=50c made +$40 WR .68; full window -$67->+$40, last-3d +$16->+$24. Cheap-NO=betting vs a market-favored bracket (mkt sees sea-breeze/late-surge the morning analog misses). Reconciles w/ edge-tilt: 26-35pp losses were the cheap-NO ones, expensive 26-35pp is +EV so NO edge-cap added. JUDGE-ONLY. Rollback: ->10 or restore config.py.bak_noprice_floor_20260528.
 PUSH_MIN_ENTRY_C_BUY_YES: int = 30   # BUY_YES needs >= 30c (raised from 25 per 2026-05-20 sweep — filters cheap-YES lottery)
 PUSH_MAX_ENTRY_C: int = 80
 

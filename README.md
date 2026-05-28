@@ -147,7 +147,7 @@ A BUY is rejected unless it clears every gate, in execution order:
 | HIGH thin-margin NO | skip BUY_NO when `(μ − per-station CLI offset)` lands inside `[floor−0.5, cap+0.5]` — i.e. shorting a bracket your own μ points into (`PUSH_SKIP_NO_MU_NEAR_BRACKET=True`) |
 | Tier-1 physics | skip if visibility < `PUSH_MIN_VSBY_MI` (0.5 mi) or wind/gust > `PUSH_MAX_WIND_MPH` (40) |
 | LOW cold-front | skip LOW if sustained wind ≥ `PUSH_LOW_FRONT_WIND_MPH` (18 mph); excludes KLAX/KMIA |
-| Price band | ask ∈ `[PUSH_MIN_ENTRY_C` (10) / `PUSH_MIN_ENTRY_C_BUY_YES` (30), `PUSH_MAX_ENTRY_C` (80)] ¢ |
+| Price band | ask ∈ `[PUSH_MIN_ENTRY_C` (50) / `PUSH_MIN_ENTRY_C_BUY_YES` (30), `PUSH_MAX_ENTRY_C` (80)] ¢ |
 | Position dedup | never add to an existing position on the exact ticker |
 | Position cap | ≤ `PUSH_MAX_TICKERS_PER_STATION_SIDE_DIRECTION` (1) per (station, series, direction), **scoped to climate-day** |
 | Cash | wallet balance ≥ min_buy |
@@ -350,6 +350,23 @@ from LLM-first to pure-code push is in the change log below.
 ---
 
 # Change log (newest first)
+
+## HIGH BUY_NO entry-price floor raised 10c -> 50c — 2026-05-28
+
+`PUSH_MIN_ENTRY_C` 10 -> 50 (Chris-approved, deep-dive 2026-05-28). BUY_NO entries below
+50c (cheap NO = betting against a market-favored bracket) were the dominant leak. Real
+pure-nn HIGH BUY_NO trades, n=75 / 9d (05-19..05-27): NO priced <50c bled -$107
+(price<0.35 ROI -43% WR .29; .35-.50 ROI -33% WR .38) while >=50c made +$40 (WR .68).
+Mechanism: at <50c the market thinks the bracket is likely and is usually right — it sees
+the afternoon sea-breeze / late surge the frozen-morning kNN analog misses (RULE #2:
+market right, our forecast wrong). Faithful replay: full window -$67 -> +$40, last-3 settled
+days +$16 -> +$24 (WR .73); positive in BOTH OOS halves. Reconciles with the edge-tilt work
+below: the 26-35pp losses were entirely the cheap-NO subset (price<.50: -$81 WR .22), while
+expensive 26-35pp is +EV (+$13 WR .67) — a PRICE floor is the right lever, NOT an edge cap
+(which would kill the profitable expensive-fat-edge band). sigma-widen (sigma_factor
+0.90->1.3) tested + rejected: monotone, washes/hurts PnL with the fixed 18pp floor. BUY_YES
+floor (PUSH_MIN_ENTRY_C_BUY_YES=30) unchanged. Rollback: PUSH_MIN_ENTRY_C -> 10 (or restore
+config.py.bak_noprice_floor_20260528).
 
 ## HIGH fat-edge de-size trigger raised 26pp -> 35pp — 2026-05-28
 
