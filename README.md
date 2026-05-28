@@ -351,6 +351,16 @@ from LLM-first to pure-code push is in the change log below.
 
 # Change log (newest first)
 
+## HIGH BUY_NO entry-price floor 50c -> 30c — 2026-05-28
+
+`PUSH_MIN_ENTRY_C` 50 -> 30. The earlier 10->50 raise (cut the cheap-NO leak) overshot.
+Re-validated NN-ONLY (settled BUY_NO n=210, 05-21..27): the leak is the 0-20c bucket (6% WR,
+-8.2c/bet); 20-30c is marginal (+4.1); 30c+ is clearly +EV (40-50c +25.7c/bet). NN-only book
++$23.6 @30c vs +$16.0 @50c -> 50c left ~$8/wk on the table. 30c = conservative end of the
+validated 20-30c range, hedging the EVAL_PASS(30-50c=+EV) vs real-fill(<50c bled) tension
+while removing the unambiguous 0-20c leak. (Earlier proposal was 20c=max-EV; 30c chosen for
+cross-source robustness.) Rollback: ->50/10 or restore config.py.bak_minentry30_20260528.
+
 ## HIGH BUY_NO entry-price floor raised 10c -> 50c — 2026-05-28
 
 `PUSH_MIN_ENTRY_C` 10 -> 50 (Chris-approved, deep-dive 2026-05-28). BUY_NO entries below
