@@ -827,7 +827,7 @@ PUSH_MIN_BUY_USD_LOW: float = 0.40
 # 2026-05-19 v3: BUY_YES needs a higher floor than BUY_NO. Analysis of 170 shadow
 # decisions showed 0/12 settled wins on BUY_YES at <15c entry (n=52 cohort,
 # MTM −$0.13/$). Cheap YES = market consensus near-zero; nn overconfident on tails.
-PUSH_MIN_ENTRY_C: int = 30           # 2026-05-28: 50->30. NN-ONLY n=210 (05-21..27): leak is 0-20c (6%WR -8.2c/bet); 20-30c marginal +4.1; 30c+ clearly +EV (40-50c +25.7). 50c floor left ~$8/wk on table (NN-only book +$23.6@30c vs +$16.0@50c). 30c hedges EVAL_PASS(30-50=+EV) vs real-fill(<50c bled) tension. Rollback ->50/10 or restore config.py.bak_minentry30_20260528.
+PUSH_MIN_ENTRY_C: int = 50           # 2026-05-28: REVERTED 30->50. Real fills (trades.jsonl n=142): <50c BLED -$182 (32%WR), >=50c +$37 (69%WR), 40-50c -$78. My 30c was an EVAL_PASS ARTIFACT (last-gate-row backed-out price drifts toward outcome). Real entry-price = ground truth. Original 50c (e5d6e01) is correct.
 PUSH_MIN_ENTRY_C_BUY_YES: int = 30   # BUY_YES needs >= 30c (raised from 25 per 2026-05-20 sweep — filters cheap-YES lottery)
 PUSH_MAX_ENTRY_C: int = 80
 

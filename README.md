@@ -351,6 +351,16 @@ from LLM-first to pure-code push is in the change log below.
 
 # Change log (newest first)
 
+## REVERT entry-price floor 30c -> 50c (my 30c was an EVAL_PASS artifact) — 2026-05-28
+
+`PUSH_MIN_ENTRY_C` 30 -> 50 (back to e5d6e01). The earlier 50->30 was based on EVAL_PASS
+gate-row backed-out prices, which are MISLEADING: the last-gate-row no_ask drifts toward the
+outcome (a winner's NO climbs ~100c, a loser's falls ~0), manufacturing a spurious "only
+<20c loses". The DECISIVE test on REAL fills (trades.jsonl entry_price, n=142, 05-14..28):
+<50c bled -$182 (32% WR), >=50c +$37 (69% WR); 40-50c alone -$78. By realized $: floor 30c
+= -$73 (still bleeding), 50c = +$37. The parallel session's 50c was correct. LESSON: judge
+entry-price/edge analysis MUST use real fills (trades.jsonl), not EVAL_PASS backed-out prices.
+
 ## HIGH BUY_NO entry-price floor 50c -> 30c — 2026-05-28
 
 `PUSH_MIN_ENTRY_C` 50 -> 30. The earlier 10->50 raise (cut the cheap-NO leak) overshot.
