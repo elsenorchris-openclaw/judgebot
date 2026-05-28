@@ -996,7 +996,11 @@ def _try_auto_execute(cand, packet: dict, decision: dict,
     # Complements (2d) -- together they catch "μ near boundary" + "matcher
     # confident outside boundary". Applies to B and T HIGH BUY_NO alike.
     if series == "HIGH" and direction == "BUY_NO":
-        _sig_floor = float(getattr(_cfg, "PUSH_HIGH_NO_MIN_SIGMA_F", 0.0))
+        # 2026-05-28: per-station override extends the global floor at stations where
+        # matcher σ is structurally under-calibrated (RMSz > 1.3 from 75-day phq backfill).
+        _sig_floor_global = float(getattr(_cfg, "PUSH_HIGH_NO_MIN_SIGMA_F", 0.0))
+        _sig_floor_by_st = getattr(_cfg, "PUSH_HIGH_NO_MIN_SIGMA_BY_STATION", {}) or {}
+        _sig_floor = float(_sig_floor_by_st.get(cand.station, _sig_floor_global))
         if _sig_floor > 0:
             _sig = packet.get("sigma_chosen")
             if _sig is not None:

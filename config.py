@@ -578,7 +578,7 @@ PUSH_HIGH_EDGE_TILT_ENABLED: bool = True
 PUSH_HIGH_EDGE_TILT_BAND_LO_PP: float = 18.0  # size up a HIGH BUY_NO when its edge is in
 PUSH_HIGH_EDGE_TILT_BAND_HI_PP: float = 26.0  # [LO, HI) pp — the reliable-edge band
 PUSH_HIGH_EDGE_TILT_MULT: float = 2.0         # up-multiplier on the station base cap, clipped to the guardrail
-PUSH_HIGH_EDGE_TILT_DESIZE_PP: float = 26.0   # at/above this edge (pp) a HIGH BUY_NO is sized DOWN
+PUSH_HIGH_EDGE_TILT_DESIZE_PP: float = 35.0   # 2026-05-28: 26->35 (deep-dive: .26-.35 band is +28c/bet PROFITABLE, was wrongly halved; .35+ stays de-sized)   # at/above this edge (pp) a HIGH BUY_NO is sized DOWN
 PUSH_HIGH_EDGE_TILT_DESIZE_MULT: float = 0.5  # de-size multiplier on the station base cap (skill stations exempt)
 
 # 2026-05-24 (Chris): per-station LOW BUY_NO size-up. Deep-dive found pooled LOW
@@ -898,6 +898,27 @@ PUSH_NO_MU_BOUNDARY_BAND_BY_STATION: dict = {
 # PUSH_SKIP_NO_MU_NEAR_BRACKET (boundary band) -- together they cover both
 # "μ near boundary" AND "matcher overconfident outside boundary" failure modes.
 PUSH_HIGH_NO_MIN_SIGMA_F: float = 1.0
+
+# 2026-05-28: Per-station HIGH BUY_NO σ floor override. Stations where the matcher's
+# claimed σ is structurally under-calibrated get a higher minimum than the global
+# PUSH_HIGH_NO_MIN_SIGMA_F (=1.0). RMSz computed on n=75 days/station phq backfill
+# (Feb-May 2026, mu_proj_f vs ext_f at h≈1.5 entry slot): floor = RMSz where RMSz > 1.3
+# (clearly above sample noise -- 1.0-1.3 band is within calibration jitter). Counterfactual
+# on 96 settled live HIGH BUY_NO trades: skipping 12 bets recovers +$36.83, concentrated
+# at KPHX -$20.75 (4/4 losers skipped) and KSAT -$6.84 (3/3 losers skipped). Tool
+# /tmp/judge_sigskip_cf.py. Confirms σ-overconfidence is station-specific, not new-vs-old
+# (KLAX is OLD; KLAS dropped from RMSz 2.11 at n=3 to 0.96 at n=75 -- noise). Empty {}
+# disables and falls back to global floor.
+PUSH_HIGH_NO_MIN_SIGMA_BY_STATION: dict = {
+    "KPHX": 2.26,   # RMSz 2.26 -- most overconfident; med_sigma 1.26 vs residual stdev 3.01
+    "KSAT": 1.96,   # RMSz 1.96
+    "KOKC": 1.74,   # RMSz 1.74
+    "KLAX": 1.59,   # RMSz 1.59 -- OLD station; σ-overconfidence is not new-vs-old
+    "KSEA": 1.41,   # RMSz 1.41
+    "KMIA": 1.41,   # RMSz 1.41
+    "KMDW": 1.34,   # RMSz 1.34
+    # all others use PUSH_HIGH_NO_MIN_SIGMA_F default (=1.0)
+}
 
 # 2026-05-27: HIGH BUY_NO σ CEILING -- skip when matcher sigma_chosen is ABOVE
 # this (low-confidence / wide-analog-cluster regime). Real-trade validation

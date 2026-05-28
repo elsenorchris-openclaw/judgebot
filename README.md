@@ -495,6 +495,27 @@ holds flat through the window where the old method drifted cold, and is never wo
 run). This shrinks the structural component of `nwp_disagree` so the 4.0°F gate stops over-blocking
 good HIGH trades (at 2.0 it had blocked ~100% of station-days; at 4.0, ~80%).
 
+## Per-station HIGH BUY_NO σ floor — 2026-05-28
+
+The global σ-floor (`PUSH_HIGH_NO_MIN_SIGMA_F=1.0`) skips a HIGH BUY_NO when the matcher's
+σ is under 1°F (matcher-overconfidence regime). 2026-05-28 deep-dive on **n=75 days/station
+phq backfill (Feb-May 2026, mu_proj_f vs ext_f at h≈1.5 entry slot)** showed the matcher's
+σ-calibration error (`RMSz` = residual stdev / claimed σ) is **station-specific, not
+new-vs-old**: NEW group mean RMSz=1.29, OLD=1.24, essentially identical. **The actual
+overconfidence cluster: KPHX (RMSz 2.26), KSAT (1.96), KOKC (1.74), KLAX (1.59, OLD!),
+KSEA (1.41), KMIA (1.41), KMDW (1.34).** Note KLAS dropped from RMSz 2.11 (n=3, small-sample
+noise) to **0.96** at n=75 — Vegas is fine on average.
+
+`PUSH_HIGH_NO_MIN_SIGMA_BY_STATION` (config.py) overrides the global floor for these 7
+stations. Counterfactual on 96 settled live HIGH BUY_NO trades (5/14-5/26 trades.jsonl,
+shadow log σ at trade-time): skipping 12 bets recovers **+$36.83** vs the unrestricted gate
+— concentrated at **KPHX −$20.75 (4/4 losers) and KSAT −$6.84 (3/3 losers)**. RMSz>1.3 cutoff
+is the practical threshold; 1.0-1.3 is within calibration jitter and skipping there hits
+winners (KAUS killed +$22 of winners when included). Why σ-floor as a SKIP gate (not a
+multiplier clip): the matcher's μ is far from the bracket on the fat-edge bombs, so even
+3-5°F σ inflation barely moves p_yes — only a hard SKIP changes outcomes. Tool
+`/tmp/judge_sigskip_cf.py`.
+
 ## Pause HIGH BUY_YES (structural losing side) — 2026-05-25
 
 Backtest on the faithful settled pool 5/19-5/23 (n=22): **HIGH BUY_YES is 36% win,

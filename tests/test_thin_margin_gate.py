@@ -199,13 +199,16 @@ class TestThinMarginGate(unittest.TestCase):
         self.assertNotIn("sigma_floor_no", reason)
 
     def test_sigma_floor_disabled_when_zero(self):
-        """PUSH_HIGH_NO_MIN_SIGMA_F=0 disables the gate even on very low σ."""
+        """PUSH_HIGH_NO_MIN_SIGMA_F=0 + empty per-station dict disables the gate
+        even on very low σ. 2026-05-28: per-station override (PUSH_HIGH_NO_MIN_SIGMA_BY_STATION)
+        also needs to be cleared since station floors override the global."""
         import config as _cfg
         cand = _make_candidate("KXHIGHMIA-26MAY26-B88.5", "KMIA",
                                 "KXHIGH", "2026-05-26")
         packet = _make_packet(95.0)
         packet["sigma_chosen"] = 0.5
-        with mock.patch.object(_cfg, "PUSH_HIGH_NO_MIN_SIGMA_F", 0.0):
+        with mock.patch.object(_cfg, "PUSH_HIGH_NO_MIN_SIGMA_F", 0.0), \
+             mock.patch.object(_cfg, "PUSH_HIGH_NO_MIN_SIGMA_BY_STATION", {}):
             executed, reason = self._run(cand, packet, _make_decision("BUY_NO"))
         self.assertNotIn("sigma_floor_no", reason)
 
