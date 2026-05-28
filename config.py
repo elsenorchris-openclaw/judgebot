@@ -578,7 +578,7 @@ PUSH_HIGH_EDGE_TILT_ENABLED: bool = True
 PUSH_HIGH_EDGE_TILT_BAND_LO_PP: float = 18.0  # size up a HIGH BUY_NO when its edge is in
 PUSH_HIGH_EDGE_TILT_BAND_HI_PP: float = 26.0  # [LO, HI) pp — the reliable-edge band
 PUSH_HIGH_EDGE_TILT_MULT: float = 2.0         # up-multiplier on the station base cap, clipped to the guardrail
-PUSH_HIGH_EDGE_TILT_DESIZE_PP: float = 35.0   # 2026-05-28: 26->35 (deep-dive: .26-.35 band is +28c/bet PROFITABLE, was wrongly halved; .35+ stays de-sized)   # at/above this edge (pp) a HIGH BUY_NO is sized DOWN
+PUSH_HIGH_EDGE_TILT_DESIZE_PP: float = 26.0   # 2026-05-28: REVERTED 35->26. My 26->35 was EVAL_PASS-based (flawed, same artifact as the price-floor); on REAL fills the .26-.35 band is +EV only at >=50c (n=10, below ship bar). Back to prior validated value.
 PUSH_HIGH_EDGE_TILT_DESIZE_MULT: float = 0.5  # de-size multiplier on the station base cap (skill stations exempt)
 
 # 2026-05-24 (Chris): per-station LOW BUY_NO size-up. Deep-dive found pooled LOW
