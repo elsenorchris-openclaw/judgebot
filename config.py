@@ -934,6 +934,15 @@ PUSH_HIGH_NO_MIN_SIGMA_BY_STATION: dict = {
 # book +$34. Opposite-tail mirror of PUSH_HIGH_NO_MIN_SIGMA_F above. 0 = off.
 PUSH_HIGH_NO_MAX_SIGMA_F: float = 2.5
 
+# (2g) one-sided NBM veto for HIGH BUY_NO (JUDGE-ONLY, 2026-05-29 deep-dive). The kNN
+# matcher under-projects hot days; skip BUY_NO when NBM's daily-high lands in
+# [floor - LO_MARGIN, cap] (shorting a bracket NBM says the heat reaches). Settled
+# backtest @judge lead (CLI settle): band = -5..-15c/bet WR.44-.58, DISTINCT from the
+# mu thin-margin gate (catches matcher-cold/mu-far cases it misses); kept book flips +.
+# THIN n (~26 incremental settled bets; v1 no OOS half) -> behind this flag. False=revert.
+PUSH_HIGH_NO_NBM_VETO_ENABLED: bool = True
+PUSH_HIGH_NO_NBM_VETO_LO_MARGIN_F: float = 2.0
+
 # 2026-05-21: LOW cold-front gate ("Tier 1.5"). Distinct from PUSH_MAX_WIND_MPH
 # above (40 mph, both sides, catastrophic). Sustained wind ≥ ~15 kt at an
 # overnight LOW is a frontal / cold-air-advection signature: the nn matcher

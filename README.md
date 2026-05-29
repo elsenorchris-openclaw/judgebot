@@ -351,6 +351,23 @@ from LLM-first to pure-code push is in the change log below.
 
 # Change log (newest first)
 
+## HIGH BUY_NO one-sided NBM veto (gate 2g) - 2026-05-29
+
+New gate PUSH_HIGH_NO_NBM_VETO_ENABLED (JUDGE-ONLY): skip a HIGH BUY_NO when NBM's
+daily-high forecast lands in [floor - PUSH_HIGH_NO_NBM_VETO_LO_MARGIN_F(2.0), cap] --
+the matcher is shorting a bracket NBM says the heat reaches. Mechanism: the kNN analog
+matcher structurally UNDER-projects hot days (cannot exceed its historical analogs'
+deltas), firing confident BUY_NO on brackets the high actually reaches; NBM (independent,
+ignored by the matcher) catches it. Settled backtest at the judge entry lead (peak-1.75h,
+CLI-final settle): the [floor-2,cap] band is -5..-15c/bet (WR .44-.58), DISTINCT from the
+(2d) mu thin-margin gate -- it catches the matcher-cold / mu-far cases (2d) misses (mu
+below the bracket while NBM is inside it). Removing the band flips the kept HIGH BUY_NO
+book positive (v1 keepers +20c/WR.80; combined -3.7c -> +7.3c). nbm_high computed
+NBM-specifically via forecast_delta (companion to _compute_mu_nwp, shares its cache).
+CAVEAT: thin n (~26 incremental settled bets; v1max has no OOS half so the judge itself
+cannot be split) -> shipped behind a flag for forward validation. Tests 464 pass.
+Rollback: PUSH_HIGH_NO_NBM_VETO_ENABLED=False (or restore *.bak_nbmveto_20260529).
+
 ## HIGH side-specific YES edge floor: YES 18->12 (NO stays 18) — 2026-05-28
 
 New `PUSH_MIN_EDGE_PP_YES=12`; `_try_auto_execute` uses it for BUY_YES, keeps `PUSH_MIN_EDGE_PP=18`

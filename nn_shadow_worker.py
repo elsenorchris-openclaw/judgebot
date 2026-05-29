@@ -57,6 +57,7 @@ def _compute_mu_nwp(station: str, climate_day: str):
     if c and (now - c[0]) < 900:
         return c[1]
     mu = None
+    nbm = None
     try:
         tz_name = nn_shadow._STATION_TZ.get(station)
         if tz_name:
@@ -69,6 +70,11 @@ def _compute_mu_nwp(station: str, climate_day: str):
             # (~-2F in the trading window, -8F by evening). Max over recent runs
             # recovers the peak an earlier run forecast; then median across models.
             runs = _fd.get_recent_runs(station, cs, ce, kind="high", n_runs=6)
+            _nbm_entries = runs.get("NBM") or []
+            _nbm_vals = [e["extreme_f"] for e in _nbm_entries
+                         if e and e.get("extreme_f") is not None]
+            if _nbm_vals:
+                nbm = round(max(_nbm_vals), 2)
             per_model = []
             for entries in runs.values():
                 vals = [e["extreme_f"] for e in entries
@@ -80,8 +86,18 @@ def _compute_mu_nwp(station: str, climate_day: str):
                 mu = round(per_model[len(per_model) // 2], 2)
     except Exception:
         mu = None
-    _mu_nwp_cache[key] = (now, mu)
+        nbm = None
+    _mu_nwp_cache[key] = (now, mu, nbm)
     return mu
+
+
+def _compute_nbm_high(station: str, climate_day: str):
+    """NBM-specific daily-high (max over recent NBM runs). Companion to
+    _compute_mu_nwp -- shares its cache + single get_recent_runs read. Used by
+    the (2g) one-sided NBM BUY_NO veto. None when unavailable (gate fails open)."""
+    _compute_mu_nwp(station, climate_day)  # ensure cache populated
+    c = _mu_nwp_cache.get((station, climate_day))
+    return c[2] if c and len(c) > 2 else None
 
 log = logging.getLogger("judge.nn_shadow_worker")
 
@@ -993,6 +1009,27 @@ def _try_auto_execute(cand, packet: dict, decision: dict,
                                    f"in[{float(_fl)-_band:.1f},{float(_cp)+_band:.1f}] band={_band:.1f}")
             except (TypeError, ValueError):
                 pass
+    # (2g) HIGH-only one-sided NBM veto for BUY_NO (JUDGE-ONLY, 2026-05-29).
+    # The kNN matcher structurally under-projects hot days (cannot exceed its
+    # historical analogs' deltas), so on heat it fires confident BUY_NO on
+    # brackets the high actually reaches; NBM (independent, ignored by the
+    # matcher) catches this. Skip BUY_NO when NBM's daily-high lands in
+    # [floor - LO_MARGIN, cap]. Settled backtest @judge lead (peak-1.75h, CLI):
+    # band = -5..-15c/bet WR.44-.58, DISTINCT from the (2d) mu thin-margin gate
+    # (catches mu-far / matcher-cold cases (2d) misses); kept book flips +.
+    # Thin n (~26 incremental settled bets; v1 no OOS half) -> behind a flag.
+    if series == "HIGH" and direction == "BUY_NO" and getattr(
+            _cfg, "PUSH_HIGH_NO_NBM_VETO_ENABLED", False):
+        _fl2 = packet.get("floor"); _cp2 = packet.get("cap"); _nbm = packet.get("nbm_high")
+        if _fl2 is not None and _cp2 is not None and _nbm is not None:
+            try:
+                _lo_m = float(getattr(_cfg, "PUSH_HIGH_NO_NBM_VETO_LO_MARGIN_F", 2.0))
+                if (float(_fl2) - _lo_m) <= float(_nbm) <= float(_cp2):
+                    return False, (f"nbm_veto nbm={float(_nbm):.1f} in "
+                                   f"[{float(_fl2)-_lo_m:.1f},{float(_cp2):.1f}] "
+                                   f"(matcher under-projects; NBM in/near bracket)")
+            except (TypeError, ValueError):
+                pass
     # (2e) HIGH BUY_NO σ floor -- skip when matcher's sigma_chosen is below
     # the configured threshold (matcher-overconfidence regime). 5/23-5/24
     # deep-dive: bad-day losers had σ avg 1.65 vs good-day winners 1.79;
@@ -1654,6 +1691,7 @@ def _evaluate_ticker(ticker: str, trigger: str) -> None:
         if cand.series_prefix == "KXHIGH":
             _mn = _compute_mu_nwp(cand.station, cand.climate_day)
             pkt["mu_nwp"] = _mn
+            pkt["nbm_high"] = _compute_nbm_high(cand.station, cand.climate_day)
             pkt["nwp_disagree"] = round(abs(pkt["mu_chosen"] - _mn), 2) if _mn is not None else None
 
         # Per-series bet cap — single source of truth is the GUARDRAILS dict
