@@ -351,6 +351,24 @@ from LLM-first to pure-code push is in the change log below.
 
 # Change log (newest first)
 
+## HIGH entry windows SHALLOWED toward near-peak (0-1h before peak) - 2026-05-29
+
+Chris-approved. `PUSH_HIGH_TEMP_WINDOW` (global default) 2.0,-1.5 -> **1.0,0.0** [peak-1..peak];
+in `PUSH_HIGH_TEMP_WINDOW_BY_STATION`, the (2.0,-1.5) tier (KATL/KDCA/KDEN/KLAX/KSFO) -> **1.0,0.0**
+and the (2.5,-2.0)+(3.0,-2.5) tier (KLAS/KMDW/KMIA/KMSY/KNYC/KOKC/KDFW/KMSP/KPHL/KPHX/KSAT/KSEA) ->
+**1.5,-0.5** [peak-1.5..peak-0.5]. The DEEP windows (KAUS 4.5,-4.0 / KBOS 5.0,-4.5 / KHOU 4.0,-3.5)
+are KEPT — real fills show >3h lead = +$1.31/bet (fine).
+
+**Why:** a WORKING (no-replay, fill-grounded) window backtest. Prior shadow-replay window sweeps were
+disproven by real fills (population-drift artifact — the 3rd time the execution-blind-replay mirage
+appeared). The valid method = bucket REAL settled fills by their actual lead-to-peak (peak from
+peak_fractional_5yr_10day.json). Result (both bots, post-50c-floor, OOS-stable): **0-1h before peak =
++$1.11/bet 86%WR (best, +EV both halves)**; 1-2h +$0.67; 2-3h -$0.52 (sign-flips=noise); >3h +$1.31.
+The deep-zone "+Xc nY DEEPER" per-station tuning that set the old windows was small-n shadow backtest
+(artifact-prone). Expected gain modest (~+$0.4/bet on moved bets); ship-with-caveats (0-1h edge could be
+partly selection; near-peak = fewer fills + sharper market). Tests 464 pass/4 skip. v1max NOT touched.
+Rollback: `config.py.bak_predeep_window_20260529`.
+
 ## HIGH BUY_NO one-sided NBM veto (gate 2g) - 2026-05-29
 
 New gate PUSH_HIGH_NO_NBM_VETO_ENABLED (JUDGE-ONLY): skip a HIGH BUY_NO when NBM's
