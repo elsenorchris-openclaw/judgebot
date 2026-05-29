@@ -829,6 +829,10 @@ def _try_auto_execute(cand, packet: dict, decision: dict,
     # nn_shadow_strategy.pure_nn_decide internal floor stays at 6pp so the
     # shadow log keeps logging marginal-edge candidates for diagnostics.
     min_edge_pp = int(getattr(_cfg, "PUSH_MIN_EDGE_PP", 12))
+    # 2026-05-28 (Chris): side-specific YES edge floor. NO floor unchanged;
+    # 12-18pp YES is +EV on pooled real fills (n=12, 67%WR, +17.9c/ct). Tail-bet gate still stacks.
+    if direction == "BUY_YES":
+        min_edge_pp = int(getattr(_cfg, "PUSH_MIN_EDGE_PP_YES", min_edge_pp))
     edge_val = decision.get("edge")
     if edge_val is None:
         return False, "no_edge"

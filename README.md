@@ -351,6 +351,15 @@ from LLM-first to pure-code push is in the change log below.
 
 # Change log (newest first)
 
+## HIGH side-specific YES edge floor: YES 18->12 (NO stays 18) — 2026-05-28
+
+New `PUSH_MIN_EDGE_PP_YES=12`; `_try_auto_execute` uses it for BUY_YES, keeps `PUSH_MIN_EDGE_PP=18`
+for BUY_NO. The 18 floor was validated on NO (n=867, 12-18pp NO=-5.7c/bet) but over-gated YES:
+pooled real-fill YES (n=63, 05-14..28) shows the 12-18pp YES band is +EV (67% WR, +17.9c/contract,
+n=12). NO unchanged; tail-bet gate (25pp) still stacks on YES. Caveat: n=12 in-band, dollar-edge
+05-27-heavy (per-contract +6.1c ex-05-27); YES capped $6 = bounded downside -> ship small + monitor.
+Test: tests/test_yes_edge_floor.py. Rollback: PUSH_MIN_EDGE_PP_YES=18.
+
 ## BUY_NO floor made HIGH-only (LOW reverts to 10c) + SEA $20 carve-out removed — 2026-05-28
 
 Two evidence-driven fixes (Chris-approved) that REMOVE harm rather than add gates. Both

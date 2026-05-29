@@ -787,6 +787,7 @@ USE_TAIL_EMPIRICAL_PYES: bool = True
 # 6→20pp to +6.0%. 12pp chosen as conservative move that preserves 70% of
 # volume while filtering bottom-edge marginal trades.
 PUSH_MIN_EDGE_PP: int = 18  # 2026-05-25 (validated): 12->18. Faithful HIGH backtest n=867 both OOS halves: 12-18pp band = -5.7c/bet; floor 18 lifts total +49->+55, c/bet +5.7->+7.2, both halves up; 20 over-trims. JUDGE-ONLY (v1max frozen).
+PUSH_MIN_EDGE_PP_YES: int = 12  # 2026-05-28 (Chris): side-specific YES edge floor; NO stays PUSH_MIN_EDGE_PP. Pooled real-fill YES n=63: 12-18pp YES +EV (67%WR n=12, +17.9c/ct); judge 18 floor was NO-validated (n=867) and over-gated YES. n small/05-27-heavy -> ship small+monitor.
 
 # 2026-05-25: per-cell reliability trade-enable gate. Skip a BUY when the
 # matcher's HISTORICAL MAE for this (station, season, local_hour, side) cell
