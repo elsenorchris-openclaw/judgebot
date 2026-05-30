@@ -351,6 +351,17 @@ from LLM-first to pure-code push is in the change log below.
 
 # Change log (newest first)
 
+## KLAS HIGH benched (PUSH_HIGH_DISABLED_STATIONS) - 2026-05-30
+
+Chris-approved. `PUSH_HIGH_DISABLED_STATIONS` frozenset() -> **{"KLAS"}** (enforced in
+`nn_shadow_worker` as `high_station_benched:KLAS`). From a 5/30 deep-dive of 5/29 HIGH P/L:
+NN-era (5/19-29) realized KLAS HIGH = **0/7 / -$80** -- the single biggest station drain in the
+book. Mechanism = the kNN matcher runs systematically HOT at Las Vegas (repeated BUY_NO shorts
+against a hot mu; mu>=90F -> 0/7, binomial p=0.029). Caveat: ~$50 of the $80 is pre-5/27-sizefix
+bug-era oversizing (post-fix KLAS n=2, ~flat), so this is **cheap tail-insurance, NOT proven live
+alpha** -- KLAS has simply never net-profited judge HIGH and the YES side is tiny (n=3, -$2.7).
+JUDGE-ONLY (v1max KLAS is +EV, n=3). Tests 464 pass / 4 skip. Commit 608ee0e. Rollback = frozenset().
+
 ## HIGH entry windows SHALLOWED toward near-peak (0-1h before peak) - 2026-05-29
 
 Chris-approved. `PUSH_HIGH_TEMP_WINDOW` (global default) 2.0,-1.5 -> **1.0,0.0** [peak-1..peak];
