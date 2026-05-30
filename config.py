@@ -694,7 +694,7 @@ PUSH_HIGH_TEMP_WINDOW_BY_STATION = {
 # it -- it falls back to the global PUSH_HIGH_TEMP_WINDOW window. Benching needs this set.
 # KSFO was benched here 2026-05-25 then RE-ENABLED same day at the $3 default: the bench
 # wasn't OOS-robust (SFO is a sign-flip across the early/late split, not a structural -EV edge).
-PUSH_HIGH_DISABLED_STATIONS = frozenset()
+PUSH_HIGH_DISABLED_STATIONS = frozenset({"KLAS"})  # 2026-05-30 (Chris): bench KLAS HIGH. NN-era 5/19-29 realized 0/7 / -$80; matcher systematically HOT at Las Vegas (mu>=90F -> 0/7, binomial p=0.029). Most of the $ is pre-5/27-sizefix bug-era (post-fix ~flat) so treat as cheap tail-insurance, NOT proven alpha; KLAS has never net-profited judge HIGH. Rollback = frozenset(). cf 5/30 deep-dive.
 
 # 2026-05-22: LOW placeholder window (analog to PUSH_HIGH_TEMP_WINDOW). The
 # MAE-built LOW overrides open too deep pre-min (h2pk>=2.0 = 40% WR in faithful
