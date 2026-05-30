@@ -351,6 +351,21 @@ from LLM-first to pure-code push is in the change log below.
 
 # Change log (newest first)
 
+## Edge-tilt up-multiplier NEUTRALIZED 2.0 -> 1.0 - 2026-05-30
+
+Chris-approved. PUSH_HIGH_EDGE_TILT_MULT 2.0 -> 1.0 (the [18,26)pp BUY_NO 'reliable band' now sizes
+at BASE, not x2). The x2 up-tilt (shipped 5/26, c8131f3) rested on a Mar15-May20 backtest claiming
+[18,26)pp = 60%WR / +8.7c/bet -- but that is a SHADOW-log replay priced at no_ask_c, i.e. the same
+EVAL_PASS / shadow-price artifact this repo already disavowed for DESIZE_PP (35->26 'EVAL_PASS-based
+flawed'). On REAL NN-era fills (5/19-29, n=27) [18,26)pp BUY_NO is -3.3c/contract, 56%WR -- NOT a +EV
+band; real fills also slip +1.4c/ct vs the harness's assumed no_ask. So x2-sizing it was unjustified
+tail risk -- exactly what put $20 on AUS-B91.5 (-$20.06, 5/29) and TPHX-B91.5 (-$19.50, 5/28) hot-bias
+busts. Sizing at base caps that tail while the band still trades. HONEST: direct $ benefit is
+small/fragile (+$4.80, AUS/TPHX-dominated) -> RISK REDUCTION, not alpha. Keep the >=26pp x0.5 DESIZE
+(real fills: [26,35) = -6.1c/ct, the toxic band). BOS skill tier + guardrails untouched. Tests 464
+pass / 4 skip. Rollback -> 2.0. Follow-up to scope: >=35pp is +9.7c/ct on real fills yet also x0.5
+de-sized, so DESIZE_PP=26 lumps a toxic band [26,35) with a good band >=35; left alone for now.
+
 ## KLAS HIGH benched (PUSH_HIGH_DISABLED_STATIONS) - 2026-05-30
 
 Chris-approved. `PUSH_HIGH_DISABLED_STATIONS` frozenset() -> **{"KLAS"}** (enforced in

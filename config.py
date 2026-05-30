@@ -582,7 +582,7 @@ PUSH_HIGH_NO_BET_BY_STATION = {}  # 2026-05-22 (Chris): removed the $30 MIA-NO c
 PUSH_HIGH_EDGE_TILT_ENABLED: bool = True
 PUSH_HIGH_EDGE_TILT_BAND_LO_PP: float = 18.0  # size up a HIGH BUY_NO when its edge is in
 PUSH_HIGH_EDGE_TILT_BAND_HI_PP: float = 26.0  # [LO, HI) pp — the reliable-edge band
-PUSH_HIGH_EDGE_TILT_MULT: float = 2.0         # up-multiplier on the station base cap, clipped to the guardrail
+PUSH_HIGH_EDGE_TILT_MULT: float = 1.0         # 2026-05-30 (Chris): NEUTRALIZED 2.0->1.0. The x2 up-tilt on [18,26)pp BUY_NO rested on a Mar15-May20 SHADOW-log harness (+8.7c/bet, priced at no_ask_c) = same EVAL_PASS/shadow-price artifact disavowed for DESIZE_PP. On REAL NN-era fills [18,26) is -3.3c/ct (56%WR n=27), NOT a +EV band, so 2x-sizing it = unjustified tail risk (the AUS -$20 / TPHX -$19.50 busts). Base size only now; risk-reduction not alpha. Keep DESIZE x0.5. Rollback -> 2.0. cf 5/30 deep-dive.
 PUSH_HIGH_EDGE_TILT_DESIZE_PP: float = 26.0   # 2026-05-28: REVERTED 35->26. My 26->35 was EVAL_PASS-based (flawed, same artifact as the price-floor); on REAL fills the .26-.35 band is +EV only at >=50c (n=10, below ship bar). Back to prior validated value.
 PUSH_HIGH_EDGE_TILT_DESIZE_MULT: float = 0.5  # de-size multiplier on the station base cap (skill stations exempt)
 
