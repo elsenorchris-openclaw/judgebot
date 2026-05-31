@@ -351,6 +351,19 @@ from LLM-first to pure-code push is in the change log below.
 
 # Change log (newest first)
 
+## Restore KDFW deep window (4th deep) - 2026-05-30
+
+Chris ("look at the deep windows"). The window-shallowing earlier today shallowed KDFW
+(3.0,-2.5 -> 1.5,-0.5) via 51c3da6's generic (2.5/3.0)-tier rule -- WRONG. On Kalshi
+truth KDFW deep is judge's BEST station: 6/6 100%WR, +$36.21, both halves + (+21/+15),
+mu accurate at peak-3h (|err|1.9F) -- a clean-rising station whose peak is predictable
+hours ahead. Restored to (3.0,-2.5). Deep windows are now the 4 clean risers AUS/BOS/HOU/
+DFW (all net + on Kalshi truth: +$41 over the 3 + DFW +$36; the lone AUS -$20 was a 1-day
+forecast outlier x the now-removed x2 edge-tilt, not a deep-window flaw). The other
+(2.5/3.0)-tier stations stay shallow -- correctly, they LOSE deep (PHX -19/MIA -39/LAS -80
+/OKC -19/MSY -21). Verified: deep is right ONLY for clean risers, not a blanket rule.
+Tests 464 pass / 4 skip. Restarted.
+
 ## Window shallowing ACTUALLY APPLIED + no-default rule - 2026-05-30
 
 Chris. The 5/29 "shallow entry windows" commit 51c3da6 was logged in this changelog but

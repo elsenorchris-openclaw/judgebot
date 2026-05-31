@@ -674,7 +674,7 @@ PUSH_HIGH_TEMP_WINDOW_BY_STATION = {
     "KBOS": (5.0, -4.5),   # KEPT deep
     "KDCA": (1.0, 0.0),    # shallowed (was 2.0,-1.5)
     "KDEN": (1.0, 0.0),    # shallowed (was 2.0,-1.5)
-    "KDFW": (1.5, -0.5),   # shallowed (was 3.0,-2.5)
+    "KDFW": (3.0, -2.5),   # KEPT DEEP (restored 2026-05-30 Chris): the 51c3da6 generic (2.5/3.0)-tier shallow-rule WRONGLY lumped DFW in. On Kalshi truth DFW deep = judge BEST station: 6/6 100%WR +$36.21, both halves + (+21/+15), mu accurate at peak-3h (|err|1.9F). Clean-rising; peak predictable 3h ahead. So 4 deep windows: AUS/BOS/HOU/DFW.
     "KHOU": (4.0, -3.5),   # KEPT deep
     "KLAS": (1.5, -0.5),   # shallowed (was 2.5,-2.0); note KLAS HIGH also benched via PUSH_HIGH_DISABLED_STATIONS
     "KLAX": (1.0, 0.0),    # shallowed (was 2.0,-1.5)
