@@ -352,6 +352,7 @@ def _shadow_nn_proj_inner(packet: dict) -> Optional[dict]:
         "match_dist_mean": res.get("match_dist_mean_f"),
         "match_dist_min": res.get("match_dist_min_f"),
         "cur_tmpf": res.get("cur_tmpf"),
+        "traj_max": res.get("traj_max"),   # 2026-05-31: for off-peak entry veto
         "neighbors": res.get("top_neighbors", []),
         "analog_summary": res.get("analog_summary"),
     }

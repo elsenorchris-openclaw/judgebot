@@ -148,6 +148,7 @@ A BUY is rejected unless it clears every gate, in execution order:
 | Tier-1 physics | skip if visibility < `PUSH_MIN_VSBY_MI` (0.5 mi) or wind/gust > `PUSH_MAX_WIND_MPH` (40) |
 | LOW cold-front | skip LOW if sustained wind ≥ `PUSH_LOW_FRONT_WIND_MPH` (18 mph); excludes KLAX/KMIA |
 | Price band | ask ∈ `[PUSH_MIN_ENTRY_C` (50) / `PUSH_MIN_ENTRY_C_BUY_YES` (30), `PUSH_MAX_ENTRY_C` (80)] ¢ |
+| HIGH off-peak (NO+YES) | skip a new HIGH BUY when `traj_max − cur_tmpf ≥ PUSH_HIGH_SKIP_IF_OFF_PEAK_F` (**1.0 °F**) **and** `h_to_peak ≤ PUSH_HIGH_OFF_PEAK_MAX_H2PK` (**2.0 h**) — temp has fallen off its intraday max while near peak ⇒ the daily high is resolving, market is sharp, we'd only pay the spread. h₂peak guard exempts the 4 deep windows (AUS/BOS/HOU/DFW, h₂peak ≥ 2.5). RULE #2-aligned (entry gate, not a sell). Kalshi-truth backtest (judge HIGH real fills, under floors): near-peak pool −$77 → +$12 both halves +; 16 now-shallow stns −$98 → +$43. `0` disables. 2026-05-31, JUDGE-ONLY |
 | Position dedup | never add to an existing position on the exact ticker |
 | Position cap | ≤ `PUSH_MAX_TICKERS_PER_STATION_SIDE_DIRECTION` (1) per (station, series, direction), **scoped to climate-day** |
 | Cash | wallet balance ≥ min_buy |

@@ -947,6 +947,20 @@ PUSH_HIGH_NO_MAX_SIGMA_F: float = 2.5
 PUSH_HIGH_NO_NBM_VETO_ENABLED: bool = True
 PUSH_HIGH_NO_NBM_VETO_LO_MARGIN_F: float = 2.0
 
+# (2h) HIGH off-peak ENTRY veto (JUDGE-ONLY, 2026-05-31 deep-dive). Skip a NEW HIGH
+# BUY (NO or YES) once the observed temp has fallen >= PUSH_HIGH_SKIP_IF_OFF_PEAK_F °F
+# below the day's running max (drop = traj_max - cur_tmpf) AND we are within
+# PUSH_HIGH_OFF_PEAK_MAX_H2PK hours of peak. The daily high is then resolving, the
+# market is sharp, and we'd only pay the spread. RULE#2-ALIGNED (decline to bet vs a
+# sharp market; an ENTRY gate, NOT a sell). The h_to_peak<=2 guard EXEMPTS the 4 deep
+# windows (AUS/BOS/HOU/DFW enter at h2pk>=2.5, where a temp dip is a passing cloud not
+# a past-peak signal and those bets WIN). Backtest under live floors (NO 50-80c /
+# YES>=30c), judge HIGH real fills 05-14..29 by true lead-to-ACTUAL-peak: near-peak
+# pool -$77 -> +$12 both halves +; 16 now-shallow stns -$98 -> +$43; deep stns
+# protected (+$60 kept). Threshold-STABLE 0.5-1.5F. 0 disables (Edits inert when off).
+PUSH_HIGH_SKIP_IF_OFF_PEAK_F: float = 1.0
+PUSH_HIGH_OFF_PEAK_MAX_H2PK: float = 2.0
+
 # 2026-05-21: LOW cold-front gate ("Tier 1.5"). Distinct from PUSH_MAX_WIND_MPH
 # above (40 mph, both sides, catastrophic). Sustained wind ≥ ~15 kt at an
 # overnight LOW is a frontal / cold-air-advection signature: the nn matcher

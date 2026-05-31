@@ -1149,6 +1149,31 @@ def _try_auto_execute(cand, packet: dict, decision: dict,
         return False, f"bad_ask_{direction}={ask_c}"
     if ask_c_i < min_c or ask_c_i > max_c:
         return False, f"price_oor ask={ask_c_i}c not in [{min_c},{max_c}]"
+    # (3.5) HIGH off-peak ENTRY veto (near-peak only). Skip a NEW HIGH BUY once the
+    # observed temp has fallen >= PUSH_HIGH_SKIP_IF_OFF_PEAK_F below the day's running
+    # max AND we are within PUSH_HIGH_OFF_PEAK_MAX_H2PK hours of peak -- the daily high
+    # is resolving, the market is sharp, and we'd only pay the spread. RULE#2-ALIGNED
+    # (decline vs a sharp market; an ENTRY gate, NOT a sell). HIGH+BUY only; LOW + exits
+    # untouched. drop = traj_max - cur_tmpf (matcher obs trajectory). The h_to_peak<=2
+    # guard exempts the 4 deep windows (AUS/BOS/HOU/DFW enter at h2pk>=2.5, where a dip
+    # is a cloud not a past-peak signal and those bets win). Fail-OPEN: missing
+    # traj_max/cur_tmpf/h_to_peak -> not gated. DISTINCT from the nn_match peak-CLAMP
+    # (that adjusts mu; this declines the entry) -> no double-veto. 0 disables.
+    if series == "HIGH":
+        _off_peak_f = float(getattr(_cfg, "PUSH_HIGH_SKIP_IF_OFF_PEAK_F", 0.0))
+        if _off_peak_f > 0:
+            _tmax = packet.get("traj_max")
+            _cur = packet.get("cur_tmpf")
+            _h2pk = (packet.get("local_clock") or {}).get("h_to_peak")
+            _max_h2pk = float(getattr(_cfg, "PUSH_HIGH_OFF_PEAK_MAX_H2PK", 2.0))
+            if (_tmax is not None and _cur is not None
+                    and _h2pk is not None and float(_h2pk) <= _max_h2pk):
+                try:
+                    _drop = float(_tmax) - float(_cur)
+                    if _drop >= _off_peak_f:
+                        return False, f"high_off_peak:{_drop:.1f}F@h2pk{float(_h2pk):.1f}"
+                except (TypeError, ValueError):
+                    pass
     # (4) Position dedup — never add to existing position on this exact ticker
     try:
         pos = _rt.positions.get(cand.ticker) if hasattr(_rt, "positions") else None
@@ -1677,6 +1702,8 @@ def _evaluate_ticker(ticker: str, trigger: str) -> None:
                             + ("_locked" if nn_res.get("extreme_locked") else ""))
         pkt["mu_chosen"] = nn_res["mu"]
         pkt["sigma_chosen"] = nn_res["sigma"]
+        pkt["cur_tmpf"] = nn_res.get("cur_tmpf")     # latest obs temp (matcher obs_trajectory[-1][1])
+        pkt["traj_max"] = nn_res.get("traj_max")     # running intraday max (for (2h) off-peak entry veto)
 
         # 2026-05-21: per-cell MEDIAN bias correction, HIGH only. Out-of-sample
         # validation: median-bias cut HIGH holdout MAE −2.1% (159/235 cells),

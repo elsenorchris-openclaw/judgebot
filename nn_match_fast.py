@@ -660,6 +660,7 @@ def predict(
         "bias_correction_applied_f": round(float(bias_correction), 3),
         "fit_quality_thresh": fit_quality_thresh,
         "cur_tmpf": float(cur_tmpf),
+        "traj_max": float(traj_max),   # 2026-05-31: running intraday max (full curve, NN_LOOKBACK_HIGH_MIN=0) for the off-peak entry veto
         "extreme_locked": extreme_locked,
         "peak_clamp_tier": peak_clamp_tier,
         "n_neighbors_used": int(n_used),
