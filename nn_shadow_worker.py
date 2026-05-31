@@ -767,7 +767,16 @@ def _in_decision_window(station: str, series: str, local_hour: float,
         # Looked up first; station absent -> global temp window above.
         # Reversible by clearing PUSH_HIGH_TEMP_WINDOW_BY_STATION.
         _by_stn = getattr(_cfg, "PUSH_HIGH_TEMP_WINDOW_BY_STATION", None) or {}
-        _w = _by_stn.get(station, _temp_win)
+        # 2026-05-30 (Chris): NO DEFAULT WINDOW. A HIGH station with no explicit
+        # per-station entry is NOT traded (loud alert) -- mirrors the
+        # PUSH_WINDOW_OVERRIDES missing-cell rule. Removes the silent global-default
+        # fallback whose ambiguity hid the 5/29 shallowing (logged to README, never
+        # applied to config).
+        if station not in _by_stn:
+            _alert_missing_window(station, series, month, climate_day,
+                "HIGH station absent from PUSH_HIGH_TEMP_WINDOW_BY_STATION (no default window) -- NOT trading")
+            return False, f"no_explicit_high_window:{station}/m{month}"
+        _w = _by_stn[station]
         before, after = float(_w[0]), float(_w[1])
     _low_temp = getattr(_cfg, "PUSH_LOW_TEMP_WINDOW", None)
     if series == "LOW" and _low_temp and month in getattr(_cfg, "PUSH_TEMP_WINDOW_MONTHS", {5}):

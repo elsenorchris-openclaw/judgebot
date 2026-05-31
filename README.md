@@ -351,6 +351,29 @@ from LLM-first to pure-code push is in the change log below.
 
 # Change log (newest first)
 
+## Window shallowing ACTUALLY APPLIED + no-default rule - 2026-05-30
+
+Chris. The 5/29 "shallow entry windows" commit 51c3da6 was logged in this changelog but
+NEVER written to config -- it touched README.md ONLY (+18 lines); `git log -S "(1.0, 0.0)"`
+shows that value never existed in config.py history. So judge had been running the DEEP
+(5/23-25) windows the whole time -- the main reason it underperformed its near-peak twin
+v1max. Code-verified: judge entered 2.5-5h PRE-peak (AUS -4.5h/BOS -5h/HOU -4h) on an
+UNCONVERGED matcher forecast (mu revises ~2F early->peak) -> wrong-bracket busts (the
+AUS-B91.5 -20.06 on 5/29 was a -4.5h deep entry); v1max enters near/at peak after
+convergence + wider windows -> better timing, more fills. Now applied for real:
+- PUSH_HIGH_TEMP_WINDOW_BY_STATION shallowed: ATL/DCA/DEN/LAX/SFO -> (1.0,0.0);
+  LAS/MDW/MIA/MSY/NYC/OKC/DFW/MSP/PHL/PHX/SAT/SEA -> (1.5,-0.5); AUS/BOS/HOU KEPT deep
+  (per 51c3da6 >3h backtest). All 20 stations EXPLICIT.
+- PUSH_HIGH_TEMP_WINDOW global is now an ENABLE-FLAG, not a default window.
+- _in_decision_window: NO DEFAULT -- a HIGH station absent from the per-station table is
+  NOT traded (loud alert), mirroring the PUSH_WINDOW_OVERRIDES missing-cell rule. Removes
+  the silent global-default fallback whose ambiguity let the 5/29 change be "shipped"
+  (README) while config silently stayed deep.
+- test_station_absent_* rewritten to assert no-trade (was: falls-back-to-global).
+Fill-backtest basis (51c3da6): 0-1h before peak = +1.11/bet 86%WR (best); deep >3h +1.31.
+Tests 464 pass / 4 skip. Restarted clean. Rollback: config.py.bak_predeep_window_20260529
++ revert the _in_decision_window block.
+
 ## Edge-tilt up-multiplier NEUTRALIZED 2.0 -> 1.0 - 2026-05-30
 
 Chris-approved. PUSH_HIGH_EDGE_TILT_MULT 2.0 -> 1.0 (the [18,26)pp BUY_NO 'reliable band' now sizes

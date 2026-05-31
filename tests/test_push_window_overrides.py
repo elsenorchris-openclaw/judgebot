@@ -178,7 +178,7 @@ if __name__ == "__main__":
 class TestPerStationTempWindow(unittest.TestCase):
     """2026-05-22: per-station HIGH temp windows (PUSH_HIGH_TEMP_WINDOW_BY_STATION)
     are looked up before the global PUSH_HIGH_TEMP_WINDOW; a station absent from
-    the dict falls back to that global. Gated behind the global being set."""
+    the dict is NOT traded (no default window; 2026-05-30 Chris). Gated behind the global being set."""
 
     def setUp(self):
         self._orig = nsw._lookup_peak_hour
@@ -210,7 +210,10 @@ class TestPerStationTempWindow(unittest.TestCase):
         ok, win, dbg = self._win("KAUS", 12.5)
         self.assertFalse(ok, dbg)
 
-    def test_station_absent_falls_back_to_global(self):
-        ok, win, dbg = self._win("KBOS", 12.5)  # not in dict -> [12.0,13.0]
-        self.assertEqual(win, (12.0, 13.0), dbg)
-        self.assertTrue(ok, dbg)
+    def test_station_absent_is_not_traded_no_default(self):
+        # 2026-05-30 (Chris): NO DEFAULT WINDOW. A HIGH station absent from the
+        # per-station dict is NOT traded -- no silent fallback to the global
+        # PUSH_HIGH_TEMP_WINDOW (which is now an enable-flag, not a default).
+        ok, win, dbg = self._win("KBOS", 12.5)  # not in dict -> NOT traded
+        self.assertFalse(ok, dbg)
+        self.assertIn("no_explicit_high_window", dbg)

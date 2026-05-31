@@ -649,7 +649,7 @@ PUSH_EARLY_TRIM_MAE_MAX: float = 1.6      # only "accurate" cells (full-size tie
 # early-trim OFF (below) since before=3.0 would otherwise be capped. Reversible:
 # set to None (and re-enable trim) to revert. Superseded by the per-(station,
 # month) regen once the full multi-year backfill lands. HIGHER VARIANCE (31% win).
-PUSH_HIGH_TEMP_WINDOW = (2.0, -1.5)   # (before, after); None=off. 2026-05-23: 30-min deep default [peak-2,peak-1.5], BEGINS at peak-2 (profitable deep zone). For stations not in BY_STATION.
+PUSH_HIGH_TEMP_WINDOW = (1.0, 0.0)   # 2026-05-30 (Chris): ENABLE FLAG ONLY for the per-station table below (must be truthy + month in PUSH_TEMP_WINDOW_MONTHS to activate). NOT a default/fallback window -- a HIGH station absent from PUSH_HIGH_TEMP_WINDOW_BY_STATION is NOT traded (see _in_decision_window, no-default rule). Tuple kept valid only for safety; never used as a per-station fallback.
 
 # 2026-05-25 (Chris): per-station HIGH price windows, REGENERATED from the
 # LAST-MONTH faithful sweep (Apr 22-May 20, 29 days), buy-at-window-open, live
@@ -660,31 +660,35 @@ PUSH_HIGH_TEMP_WINDOW = (2.0, -1.5)   # (before, after); None=off. 2026-05-23: 3
 # Dominant finding vs the prior windows: they were too SHALLOW -> most stations
 # moved DEEPER (the market is soft 3-5h pre-peak and sharp into the peak).
 PUSH_HIGH_TEMP_WINDOW_BY_STATION = {
-    # Defensible ship rule: moved to a new window only where well-supported
-    # (n>=8, BOTH date-halves positive, profitable); else kept the prior live
-    # window. c/bet + n are the last-month buy-at-open numbers. KSFO was benched
-    # 2026-05-25 then RE-ENABLED same day at $5 (the bench wasn't OOS-robust --
-    # SFO flips sign across the early/late split); it uses the global deep window.
-    "KATL": (2.0, -1.5),   # +14c n17 (was 3.5; shallower)
-    "KAUS": (4.5, -4.0),   # +19c n8  (was 2.5 -5c -> flips +, DEEPER)
-    "KBOS": (5.0, -4.5),   # +44c n10 90%WR (was 1.5 +7c; DEEPER, clean monotonic rise)
-    "KDCA": (2.0, -1.5),   # no last-month data -> global deep default (unchanged)
-    "KDEN": (2.0, -1.5),   # +6c n14 (unchanged; deep is +EV but thin n6)
-    "KDFW": (3.0, -2.5),   # +38c n8  (was 2.5 +7c; DEEPER)
-    "KHOU": (4.0, -3.5),   # +8c n12  (was 1.0 -12c -> flips +, DEEPER; deep -> watch stale AM fills)
-    "KLAS": (2.5, -2.0),   # +14c n18 (was 2.0; DEEPER)
-    "KLAX": (2.0, -1.5),   # +11c n15 (was 3.0 -1c -> flips +, shallower)
-    "KMDW": (2.5, -2.0),   # +17c n12 (was 1.0 -18c -> flips +, DEEPER)
-    "KMIA": (2.5, -2.0),   # +26c n15 (was 3.0 +18c; shallower)
-    "KMSP": (3.0, -2.5),   # +6c n14  (was 1.5 -2c -> flips +, DEEPER)
-    "KMSY": (2.5, -2.0),   # +9c n13  (unchanged)
-    "KNYC": (2.5, -2.0),   # 2026-05-25: 3.5->2.5. The 3.5h window backtests NEGATIVE at the live 18pp floor (-7.2c May / -7.5c all-era, NO 37%) -- mu over-projects the high ~+1F that deep, so it shorts brackets the high lands in. peak-2.5h is robust both-halves +EV (+12.1c May / +3.6c all-era, NO 57%). On full-curve mu (NN_LOOKBACK_HIGH_MIN=0). Prior 3.5 "+9c n17" was a last-month/12pp-floor artifact.
-    "KOKC": (2.5, -2.0),   # +19c n12 (was 1.0; DEEPER)
-    "KPHL": (3.0, -2.5),   # +11c n13 (unchanged; no better both-halves+ window)
-    "KPHX": (3.0, -2.5),   # +13c n12 (was 2.0; DEEPER)
-    "KSAT": (3.0, -2.5),   # +17c n13 (was 2.0; DEEPER)
-    "KSEA": (3.0, -2.5),   # +27c n14 (unchanged; already best)
-    "KSFO": (2.0, -1.5),   # 2026-05-25: re-enabled at $3 default; global deep window (no +EV last-month slot, not optimized)
+    # *** SOLE LIVE SOURCE for May HIGH entry windows (before, after) rel. peak. ***
+    # 2026-05-30 (Chris): SHALLOWED to near-peak. This is the 51c3da6 (5/29) change
+    # that was logged to README but NEVER written to config -- judge had been running
+    # the DEEP (5/23-25) windows the whole time. Fill-grounded backtest (51c3da6, both
+    # bots, post-50c-floor, OOS-stable): 0-1h before peak = +$1.11/bet 86%WR (best);
+    # 1-2h +$0.67; 2-3h -$0.52 noise; >3h deep +$1.31. NO DEFAULT: every traded station
+    # is explicit here; a station missing is NOT traded (see _in_decision_window). To
+    # change a window, edit THIS table (the PUSH_WINDOW_OVERRIDES table is only used for
+    # non-May / LOW). Rollback: restore config.py.bak_predeep_window_20260529.
+    "KATL": (1.0, 0.0),    # shallowed (was 2.0,-1.5)
+    "KAUS": (4.5, -4.0),   # KEPT deep per 51c3da6 (>3h lead +$1.31/bet). WATCH: 5/29 AUS -$20 bust WAS a deep entry -- revisit.
+    "KBOS": (5.0, -4.5),   # KEPT deep
+    "KDCA": (1.0, 0.0),    # shallowed (was 2.0,-1.5)
+    "KDEN": (1.0, 0.0),    # shallowed (was 2.0,-1.5)
+    "KDFW": (1.5, -0.5),   # shallowed (was 3.0,-2.5)
+    "KHOU": (4.0, -3.5),   # KEPT deep
+    "KLAS": (1.5, -0.5),   # shallowed (was 2.5,-2.0); note KLAS HIGH also benched via PUSH_HIGH_DISABLED_STATIONS
+    "KLAX": (1.0, 0.0),    # shallowed (was 2.0,-1.5)
+    "KMDW": (1.5, -0.5),   # shallowed (was 2.5,-2.0)
+    "KMIA": (1.5, -0.5),   # shallowed (was 2.5,-2.0)
+    "KMSP": (1.5, -0.5),   # shallowed (was 3.0,-2.5)
+    "KMSY": (1.5, -0.5),   # shallowed (was 2.5,-2.0)
+    "KNYC": (1.5, -0.5),   # shallowed (was 2.5,-2.0)
+    "KOKC": (1.5, -0.5),   # shallowed (was 2.5,-2.0)
+    "KPHL": (1.5, -0.5),   # shallowed (was 3.0,-2.5)
+    "KPHX": (1.5, -0.5),   # shallowed (was 3.0,-2.5)
+    "KSAT": (1.5, -0.5),   # shallowed (was 3.0,-2.5)
+    "KSEA": (1.5, -0.5),   # shallowed (was 3.0,-2.5)
+    "KSFO": (1.0, 0.0),    # shallowed (was 2.0,-1.5)
 }
 
 # 2026-05-25 (Chris): HIGH stations to BENCH (skip HIGH push auto-exec entirely).
