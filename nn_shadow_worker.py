@@ -106,6 +106,29 @@ log = logging.getLogger("judge.nn_shadow_worker")
 # ─────────────────────────────────────────────────────────────────────────────
 SHADOW_LOG_PATH = Path("/home/ubuntu/paper_judge_bot/data/shadow_nn_strategy.jsonl")
 WETHR_CACHE_PATH = Path("/home/ubuntu/shared/wethr_cache.json")
+
+# 2026-06-01: pure-additive logging of current obs temp + wethr probable-high/low
+# lock signals (settlement-grade source) for post-hoc edge validation. Defensive:
+# never raises into the logging path; 5s TTL cache avoids per-eval file reads.
+_wethr_extra_cache = {}
+def _wethr_obs_extra(station):
+    try:
+        _now = time.time()
+        _c = _wethr_extra_cache.get("__all__")
+        if _c is None or _now - _c[0] > 5.0:
+            with open(WETHR_CACHE_PATH) as _f:
+                _data = json.load(_f)
+            _wethr_extra_cache["__all__"] = (_now, _data.get("stations", {}) or {})
+        _sts = _wethr_extra_cache["__all__"][1]
+        _st = _sts.get(station) or _sts.get(station.lstrip("K")) or _sts.get("K" + station) or {}
+        return {
+            "current_temp_f": _st.get("temp_f"),
+            "wethr_highest_probable_f": _st.get("highest_probable_f"),
+            "wethr_lowest_probable_f": _st.get("lowest_probable_f"),
+        }
+    except Exception:
+        return {}
+
 DEBOUNCE_SEC = 30.0          # min seconds between evaluations of same ticker
 WETHR_POLL_SEC = 5.0         # how often the wethr filewatch thread wakes up
 ASK_CHANGE_MIN_C = 1         # ignore BBO callbacks where ask didn't move ≥ this
@@ -1690,6 +1713,7 @@ def _evaluate_ticker(ticker: str, trigger: str) -> None:
                            "spread_c": pkt.get("spread_c")},
                 "nn_fired": False,
                 "rm": pkt.get("running_min_or_max"),
+                **_wethr_obs_extra(cand.station),
                 "signals": _signals_block(pkt),
                 "push_override": pkt.get("push_override"),
                 "decision": "SKIP",
@@ -1947,6 +1971,7 @@ def _evaluate_ticker(ticker: str, trigger: str) -> None:
                 "match_dist_min": nn_res.get("match_dist_min"),
             },
             "rm": pkt.get("running_min_or_max"),
+            **_wethr_obs_extra(cand.station),
             "rm_age_sec": (pkt.get("rm_age_max_sec") if cand.series_prefix == "KXHIGH"
                            else pkt.get("rm_age_min_sec")),
             "wethr_age_sec": _wethr_age_sec(pkt),
