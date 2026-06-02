@@ -4043,6 +4043,22 @@ def execute_buy(rt: Runtime, cand: market_universe.Candidate,
     # positions (no baseline) hold to settlement as before.
     _entry_bid_c = (packet.get("no_bid_c") if decision.decision == "BUY_NO"
                     else packet.get("yes_bid_c"))
+    # 2026-06-02 (Chris): station-local wall time of the entry (HH:MM), from the
+    # same local_clock the deep-window gate uses. Pairs with h_to_peak (lead).
+    _lc = packet.get("local_clock") or {}
+    _local_hr = _lc.get("local_hour")
+    _local_time = None
+    if _local_hr is not None:
+        try:
+            _lhf = float(_local_hr) % 24.0
+            _hh = int(_lhf)
+            _mm = int(round((_lhf - _hh) * 60))
+            if _mm == 60:
+                _hh = (_hh + 1) % 24
+                _mm = 0
+            _local_time = f"{_hh:02d}:{_mm:02d}"
+        except (TypeError, ValueError):
+            _local_time = None
     rec = {
         "ts": rt.ctx.now_utc,
         "kind": "entry",
@@ -4068,8 +4084,10 @@ def execute_buy(rt: Runtime, cand: market_universe.Candidate,
         "sigma_chosen": packet.get("sigma_chosen"),
         "mu_chosen": packet.get("mu_chosen"),
         # 2026-06-02 (Chris): record the lead-to-peak (deep-window context, also
-        # shown on the Discord buy card). Negative = past peak.
-        "h_to_peak": (packet.get("local_clock") or {}).get("h_to_peak"),
+        # shown on the Discord buy card) + station-local wall time. Negative = past peak.
+        "h_to_peak": _lc.get("h_to_peak"),
+        "local_hour": _local_hr,
+        "local_time": _local_time,
         # Series + bracket kind + market price + extracted prob + gap.
         # Lets us run the same winner/loser analysis on actual BUYs that we
         # already run on shadow_trades (see scripts/r2_compare.py).

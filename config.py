@@ -1254,5 +1254,12 @@ BLEND_EXEMPT_HIGH_SIGMA_FLOOR: bool = True
 # where there's no edge anyway). All 8 trades on 2026-06-02 were matcher (the blend
 # was dead-gated until be6402a, then fell back on a thin evening market). False reverts.
 BLEND_ONLY_EXECUTION: bool = True
+# 2026-06-02 (Chris): the nn_match matcher fallback "did well" on 6/2 (every position
+# it bought was positive MTM). With BLEND_ONLY_EXECUTION on, it is blocked from REAL
+# orders -- so instead route it to an ISOLATED PAPER book (data/paper_trades.jsonl):
+# no real order, no real position, no cash/cap impact, zero effect on the blend's
+# real trading. Lets us measure whether the matcher has live edge before ever risking
+# money on it. Only genuine matcher mu (nn_match_*) is papered. False = hard-block it.
+MATCHER_PAPER_ENABLED: bool = True
   # LOW: edge peaks ~min-2h (NOT deeper, unlike HIGH); window [min-3h, min-1.5h]. Small/noisy sample (~5mo). Models retrained at climo-min-2h.
           # LOW validated (+7.22c); False for HIGH-only

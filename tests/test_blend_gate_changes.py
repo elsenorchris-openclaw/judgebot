@@ -150,9 +150,11 @@ class TestBlendOnlyExecution(_Base):
                 "mu_method": mu_method, "local_clock": {"h_to_peak": 2.0}}
 
     def test_matcher_mu_blocked(self):
+        # With the paper book OFF, a matcher mu is hard-blocked from real execution.
         import config as _cfg
         cand = _cand("KXHIGHMIA-26MAY20-B88.5", "KMIA")
-        with mock.patch.object(_cfg, "BLEND_ONLY_EXECUTION", True):
+        with mock.patch.object(_cfg, "BLEND_ONLY_EXECUTION", True), \
+             mock.patch.object(_cfg, "MATCHER_PAPER_ENABLED", False):
             ok, reason = self._run(cand, self._pkt("nn_match_high_n50"), _decision("BUY_NO"))
         self.assertFalse(ok)
         self.assertIn("blend_only", reason)
@@ -178,6 +180,68 @@ class TestBlendOnlyExecution(_Base):
         with mock.patch.object(_cfg, "BLEND_ONLY_EXECUTION", False):
             ok, reason = self._run(cand, self._pkt("nn_match_high_n50"), _decision("BUY_NO"))
         self.assertNotIn("blend_only", reason)
+
+
+class TestMatcherPaper(_Base):
+    """2026-06-02: with BLEND_ONLY_EXECUTION + MATCHER_PAPER_ENABLED, a genuine
+    nn_match matcher mu is routed to the ISOLATED paper book (return True, reason
+    'paper_matcher') instead of being hard-blocked or really executed. The paper
+    diversion happens at the dedup step, BEFORE any real-state code, so the blend's
+    real trading is untouched. sigma=2.5 clears the per-station floor; mu=92 sits
+    outside the [88,89] bracket so the tail-bet gate stays clear."""
+    def _pkt(self, mu_method):
+        return {"yes_ask_c": 50, "no_ask_c": 50, "seconds_to_close": 10_000,
+                "mu_chosen": 92.0, "floor": 88.0, "cap": 89.0, "sigma_chosen": 2.5,
+                "mu_method": mu_method,
+                "local_clock": {"h_to_peak": 3.0, "local_hour": 12.0}}
+
+    def test_matcher_routed_to_paper(self):
+        import config as _cfg
+        cand = _cand("KXHIGHMIA-26MAY20-B88.5", "KMIA")
+        with mock.patch.object(_cfg, "BLEND_ONLY_EXECUTION", True), \
+             mock.patch.object(_cfg, "MATCHER_PAPER_ENABLED", True), \
+             mock.patch.object(nsw, "_paper_positions", set()), \
+             mock.patch.object(nsw, "_paper_record_entry") as rec:
+            ok, reason = self._run(cand, self._pkt("nn_match_high_n50"), _decision("BUY_NO"))
+        self.assertTrue(ok)
+        self.assertIn("paper_matcher", reason)
+        rec.assert_called_once()
+
+    def test_paper_dedup_blocks_second(self):
+        import config as _cfg
+        cand = _cand("KXHIGHMIA-26MAY20-B88.5", "KMIA")
+        with mock.patch.object(_cfg, "BLEND_ONLY_EXECUTION", True), \
+             mock.patch.object(_cfg, "MATCHER_PAPER_ENABLED", True), \
+             mock.patch.object(nsw, "_paper_positions", {"KXHIGHMIA-26MAY20-B88.5"}), \
+             mock.patch.object(nsw, "_paper_record_entry") as rec:
+            ok, reason = self._run(cand, self._pkt("nn_match_high_n50"), _decision("BUY_NO"))
+        self.assertFalse(ok)
+        self.assertIn("paper_dup", reason)
+        rec.assert_not_called()
+
+    def test_blend_row_not_papered(self):
+        # A blend mu still takes the REAL path (execute_buy is mocked in _run), never paper.
+        import config as _cfg
+        cand = _cand("KXHIGHMIA-26MAY20-B88.5", "KMIA")
+        with mock.patch.object(_cfg, "BLEND_ONLY_EXECUTION", True), \
+             mock.patch.object(_cfg, "MATCHER_PAPER_ENABLED", True), \
+             mock.patch.object(nsw, "_paper_positions", set()), \
+             mock.patch.object(nsw, "_paper_record_entry") as rec:
+            ok, reason = self._run(cand, self._pkt("blend_KXHIGH"), _decision("BUY_NO"))
+        self.assertNotIn("paper_matcher", reason)
+        rec.assert_not_called()
+
+    def test_none_mu_not_papered_still_blocked(self):
+        # A missing mu_method is NOT a matcher mu -> hard-blocked even with paper on.
+        import config as _cfg
+        cand = _cand("KXHIGHMIA-26MAY20-B88.5", "KMIA")
+        with mock.patch.object(_cfg, "BLEND_ONLY_EXECUTION", True), \
+             mock.patch.object(_cfg, "MATCHER_PAPER_ENABLED", True), \
+             mock.patch.object(nsw, "_paper_record_entry") as rec:
+            ok, reason = self._run(cand, self._pkt(None), _decision("BUY_NO"))
+        self.assertFalse(ok)
+        self.assertIn("blend_only", reason)
+        rec.assert_not_called()
 
 
 if __name__ == "__main__":

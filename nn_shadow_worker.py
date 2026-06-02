@@ -1102,6 +1102,71 @@ def _in_decision_window(station: str, series: str, local_hour: float,
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Matcher PAPER book (2026-06-02, Chris) — the nn_match fallback is blocked from
+# REAL orders by BLEND_ONLY_EXECUTION, so paper-trade it to an ISOLATED log to
+# later judge whether it has live edge. Fully separate from _rt.positions / cash /
+# caps / execute_buy — zero impact on the blend's real trading.
+# ─────────────────────────────────────────────────────────────────────────────
+_paper_positions: set = set()
+_paper_log_ts = [0.0]
+
+def _fmt_local_time(lh):
+    """Local clock hour float (e.g. 13.52) -> 'HH:MM', or None."""
+    if lh is None:
+        return None
+    try:
+        lh = float(lh) % 24.0
+        h = int(lh)
+        m = int(round((lh - h) * 60))
+        if m == 60:
+            h = (h + 1) % 24
+            m = 0
+        return f"{h:02d}:{m:02d}"
+    except (TypeError, ValueError):
+        return None
+
+def _paper_record_entry(cand, packet, decision, direction, ask_c_i, series, edge_pp):
+    """Append one isolated matcher PAPER entry (no real order/position/cash). One
+    row per ticker; joined to Kalshi settlement later for paper P&L analysis."""
+    try:
+        lc = packet.get("local_clock") or {}
+        rec = {
+            "ts": time.time(),
+            "kind": "paper_entry",
+            "book": "matcher_paper",
+            "ticker": cand.ticker,
+            "station": cand.station,
+            "series": cand.series_prefix,
+            "climate_day": cand.climate_day,
+            "bracket_kind": cand.bracket_kind,
+            "floor": cand.floor,
+            "cap": cand.cap,
+            "label": getattr(cand, "bracket_label", None),
+            "action": direction,
+            "entry_price": round(ask_c_i / 100.0, 4),
+            "market_price_c": ask_c_i,
+            "mu_method": packet.get("mu_method"),
+            "mu_chosen": packet.get("mu_chosen"),
+            "sigma_chosen": packet.get("sigma_chosen"),
+            "edge_pp": round(edge_pp, 2),
+            "p_yes": decision.get("p_yes"),
+            "h_to_peak": lc.get("h_to_peak"),
+            "local_hour": lc.get("local_hour"),
+            "local_time": _fmt_local_time(lc.get("local_hour")),
+        }
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            "data", "paper_trades.jsonl")
+        with open(path, "a") as f:
+            f.write(json.dumps(rec) + "\n")
+        if (time.time() - _paper_log_ts[0]) > 60:
+            _paper_log_ts[0] = time.time()
+            log.info("PAPER matcher entry %s %s @%dc edge=%.1fpp h2p=%s",
+                     direction, cand.ticker, ask_c_i, edge_pp, lc.get("h_to_peak"))
+    except Exception:
+        log.exception("paper record failed for %s", getattr(cand, "ticker", "?"))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Auto-execute via real Kalshi order (push pure-code architecture)
 # ─────────────────────────────────────────────────────────────────────────────
 def _try_auto_execute(cand, packet: dict, decision: dict,
@@ -1136,10 +1201,22 @@ def _try_auto_execute(cand, packet: dict, decision: dict,
     # NOT trade -- it has no proven live edge, and it only becomes the active mu when
     # _compute_market_mu is None, i.e. on thin/illiquid or post-peak markets where the
     # blend can't price and there's no edge anyway. Reversible: BLEND_ONLY_EXECUTION=False.
+    paper_mode = False
     if getattr(_cfg, "BLEND_ONLY_EXECUTION", True):
         _mm = str(packet.get("mu_method") or "")
         if not _mm.startswith("blend_"):
-            return False, f"blend_only: mu_method={_mm or 'none'} (matcher fallback not executed)"
+            # 2026-06-02 (Chris): route the nn_match matcher fallback to an ISOLATED
+            # PAPER book instead of hard-blocking it, so we can later analyze whether
+            # it has live edge. Paper rows flow through the SAME signal gates below
+            # (edge/window/price/spread/sigma/tail) but divert at the dedup step,
+            # BEFORE any _rt.positions / cash / cap / execute_buy code -> zero impact
+            # on the blend's real trading. Only genuine matcher mu is papered; a
+            # missing/other mu_method is still hard-blocked.
+            if (getattr(_cfg, "MATCHER_PAPER_ENABLED", False)
+                    and _mm.startswith("nn_match_")):
+                paper_mode = True
+            else:
+                return False, f"blend_only: mu_method={_mm or 'none'} (matcher fallback not executed)"
     short_dir = "NO" if direction == "BUY_NO" else "YES"
     # (Gate 2) Edge floor — bot only fires above PUSH_MIN_EDGE_PP. The
     # nn_shadow_strategy.pure_nn_decide internal floor stays at 6pp so the
@@ -1491,7 +1568,17 @@ def _try_auto_execute(cand, packet: dict, decision: dict,
                         return False, f"high_off_peak:{_drop:.1f}F@h2pk{float(_h2pk):.1f}"
                 except (TypeError, ValueError):
                     pass
-    # (4) Position dedup — never add to existing position on this exact ticker
+    # (4) Position dedup — never add to existing position on this exact ticker.
+    # PAPER DIVERSION: a matcher paper row has now cleared every SIGNAL gate above
+    # (edge/window/price/spread/sigma/tail). Dedup against the isolated paper book,
+    # record it, and return HERE — before any real-state code (caps/cash/correlation/
+    # execute_buy) runs. This is what keeps the paper book from touching real trading.
+    if paper_mode:
+        if cand.ticker in _paper_positions:
+            return False, "paper_dup_position"
+        _paper_record_entry(cand, packet, decision, direction, ask_c_i, series, edge_pp)
+        _paper_positions.add(cand.ticker)
+        return True, f"paper_matcher {direction} edge={edge_pp:.1f}pp ask={ask_c_i}c"
     try:
         pos = _rt.positions.get(cand.ticker) if hasattr(_rt, "positions") else None
         if pos and float(pos.get("cost", 0)) > 0:
