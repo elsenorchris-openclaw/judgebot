@@ -155,11 +155,12 @@ class TestLowTempWindow(unittest.TestCase):
         import config as _c
         self._t = mock.patch.object(_c, "PUSH_LOW_TEMP_WINDOW", (0.5, 1.5))
         self._u = mock.patch.object(_c, "USE_PUSH_WINDOW_OVERRIDES", True)
-        self._t.start(); self._u.start()
+        self._d = mock.patch.object(_c, "BLEND_DEEP_WINDOW_ENABLED", False)
+        self._t.start(); self._u.start(); self._d.start()
 
     def tearDown(self):
         nsw._lookup_peak_hour = self._orig
-        self._t.stop(); self._u.stop()
+        self._t.stop(); self._u.stop(); self._d.stop()
 
     def _win(self, station, hour):
         ok, dbg = nsw._in_decision_window(station, "LOW", hour, "2026-05-19")
