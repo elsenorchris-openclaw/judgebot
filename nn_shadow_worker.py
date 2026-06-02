@@ -118,6 +118,10 @@ def _compute_nbm_high(station: str, climate_day: str):
 # FAIL-SAFE: every path returns None -> the caller keeps the matcher mu.
 # ─────────────────────────────────────────────────────────────────────────────
 _market_mu_cache: dict = {}
+# 2026-06-02: histogram of "fresh two-sided brackets found" per market_mu call,
+# bucketed 0 / 1 / 2 / 3+ . implied_mu needs >=3, so 0/1/2 are the fallback cause
+# (thin or stale book); 3+ that still returns None would be an implied_mu reject.
+_mktmu_nbrk_hist = {"0": 0, "1": 0, "2": 0, "3+": 0}
 
 def _compute_market_mu(station, climate_day, prefix):
     """Ladder-implied mu (cents) from the live BBO cache for this station-day."""
@@ -154,6 +158,8 @@ def _compute_market_mu(station, climate_day, prefix):
                 continue
             brackets.append({"kind": c2.bracket_kind, "floor": c2.floor, "cap": c2.cap,
                              "yes_bid": yb_c, "yes_ask": ya_c})
+        nb = len(brackets)
+        _mktmu_nbrk_hist["3+" if nb >= 3 else str(nb)] += 1
         mu = blend_forecast.implied_mu(brackets)
     except Exception:
         mu = None
@@ -263,6 +269,20 @@ def _compute_fc_min_hour(station, climate_day):
 
 _fc_minhour_cache: dict = {}
 _blend_log_ts = [0.0]
+# 2026-06-02: diagnostics for WHY the blend falls back to the matcher. Cumulative
+# counts (fired vs each None reason), logged every 5 min, so we can see whether the
+# fallback is market_mu (thin/stale book = <3 fresh brackets), obs, or it's firing.
+_blend_diag = {"fired": 0, "none_market_mu": 0, "none_rm_curt": 0, "none_blend_mu": 0}
+_blend_diag_ts = [0.0]
+def _blend_diag_tick(key):
+    _blend_diag[key] = _blend_diag.get(key, 0) + 1
+    if time.time() - _blend_diag_ts[0] > 300:
+        _blend_diag_ts[0] = time.time()
+        try:
+            log.info("BLEND fallback diag (cumulative): %s | market_mu fresh-bracket hist: %s",
+                     dict(_blend_diag), dict(_mktmu_nbrk_hist))
+        except Exception:
+            pass
 def _compute_blend_override(cand, pkt, nn_res):
     """Return (mu, sigma) from the blend, or None to keep the matcher mu."""
     try:
@@ -276,12 +296,14 @@ def _compute_blend_override(cand, pkt, nn_res):
         variant = getattr(_cfg, "BLEND_FORECAST_VARIANT", "conservative")
         mkt = _compute_market_mu(cand.station, cand.climate_day, cand.series_prefix)
         if mkt is None:
+            _blend_diag_tick("none_market_mu")
             return None
         rm = pkt.get("running_min_or_max")
         curt = (nn_res or {}).get("cur_tmpf")
         if curt is None:
             curt = pkt.get("cur_tmpf")
         if rm is None or curt is None:
+            _blend_diag_tick("none_rm_curt")
             return None
         nwp = None
         if variant == "full":
@@ -311,6 +333,7 @@ def _compute_blend_override(cand, pkt, nn_res):
                          pkt.get("mu_chosen", 0.0), r[0], r[1], mkt)
             except Exception:
                 pass
+        _blend_diag_tick("fired" if r is not None else "none_blend_mu")
         return r
     except Exception:
         return None

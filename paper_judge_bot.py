@@ -4067,6 +4067,9 @@ def execute_buy(rt: Runtime, cand: market_universe.Candidate,
         "mu_method": packet.get("mu_method"),
         "sigma_chosen": packet.get("sigma_chosen"),
         "mu_chosen": packet.get("mu_chosen"),
+        # 2026-06-02 (Chris): record the lead-to-peak (deep-window context, also
+        # shown on the Discord buy card). Negative = past peak.
+        "h_to_peak": (packet.get("local_clock") or {}).get("h_to_peak"),
         # Series + bracket kind + market price + extracted prob + gap.
         # Lets us run the same winner/loser analysis on actual BUYs that we
         # already run on shadow_trades (see scripts/r2_compare.py).
