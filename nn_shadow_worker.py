@@ -127,20 +127,30 @@ def _compute_market_mu(station, climate_day, prefix):
             c2 = market_universe.parse_ticker(tk)
             if not c2 or c2.station != station or c2.climate_day != climate_day:
                 continue
-            bbo = _kws.get_bbo(tk)
-            if not bbo:
+            ce = _kws._bbo_cache.get(tk)
+            if not ce:
                 continue
-            yb = bbo.get("yes_bid"); ya = bbo.get("yes_ask")
+            # 10-min staleness bound: the ladder-implied mu is a slow aggregate
+            # (the model ANCHOR); the execution still crosses the fresh ask. A
+            # generous bound keeps the blend active when books update sparsely
+            # (overnight) without trusting truly stale quotes.
+            if now - ce.get("ts", 0) > 600:
+                continue
+            yb = ce.get("yes_bid"); ya = ce.get("yes_ask")
             if yb is None or ya is None:
                 continue
+            yb_c = yb * 100.0; ya_c = ya * 100.0
+            if ya_c <= yb_c or ya_c <= 0 or ya_c > 100:
+                continue
             brackets.append({"kind": c2.bracket_kind, "floor": c2.floor, "cap": c2.cap,
-                             "yes_bid": yb * 100.0, "yes_ask": ya * 100.0})
+                             "yes_bid": yb_c, "yes_ask": ya_c})
         mu = blend_forecast.implied_mu(brackets)
     except Exception:
         mu = None
     _market_mu_cache[key] = (now, mu)
     return mu
 
+_blend_log_ts = [0.0]
 def _compute_blend_override(cand, pkt, nn_res):
     """Return (mu, sigma) from the blend, or None to keep the matcher mu."""
     try:
@@ -161,7 +171,16 @@ def _compute_blend_override(cand, pkt, nn_res):
             curt = pkt.get("cur_tmpf")
         if rm is None or curt is None:
             return None
-        return blend_forecast.blend_mu(side, float(mkt), float(rm), float(curt), None, variant)
+        r = blend_forecast.blend_mu(side, float(mkt), float(rm), float(curt), None, variant)
+        if r is not None and (time.time() - _blend_log_ts[0]) > 60:
+            _blend_log_ts[0] = time.time()
+            try:
+                log.info("BLEND applied %s %s/%s: mu %.1f->%.1f sigma=%.2f (mkt_mu=%.1f)",
+                         cand.series_prefix, cand.station, cand.climate_day,
+                         pkt.get("mu_chosen", 0.0), r[0], r[1], mkt)
+            except Exception:
+                pass
+        return r
     except Exception:
         return None
 
