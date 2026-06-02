@@ -58,18 +58,19 @@ class TestThinMarginGate(unittest.TestCase):
         nsw._rt = self._orig_rt
         nsw._in_decision_window = self._orig_window
 
-    def _run(self, cand, packet, decision, series="HIGH"):
+    def _run(self, cand, packet, decision, series="HIGH", thin_margin=True):
         import paper_judge_bot as pjb
         import kalshi_client
         import config as _cfg
-        # Isolate the thin-margin mechanism: the per-cell MAE gate (2026-05-25)
-        # sits earlier in the stack and would preempt some (station,hour) cells
-        # (e.g. KDCA MAM h12 MAE 2.47 > 2.0). Disable it here so these cases
-        # exercise the thin-margin gate specifically.
+        # Isolate the thin-margin mechanism: disable the per-cell MAE gate (sits
+        # earlier in the stack) and PIN PUSH_SKIP_NO_MU_NEAR_BRACKET to the value
+        # under test. 2026-06-02: the live default flipped to False ($1 experiment),
+        # so these tests must set the flag explicitly to exercise the gate logic.
         with mock.patch.object(pjb, "execute_buy", lambda *a, **kw: None), \
              mock.patch.object(kalshi_client, "get_balance_cached",
                                return_value=100.0), \
-             mock.patch.object(_cfg, "PUSH_MAE_GATE_ENABLED", False):
+             mock.patch.object(_cfg, "PUSH_MAE_GATE_ENABLED", False), \
+             mock.patch.object(_cfg, "PUSH_SKIP_NO_MU_NEAR_BRACKET", thin_margin):
             return nsw._try_auto_execute(
                 cand, packet, decision, series=series, local_hour=12.0,
             )
@@ -128,13 +129,11 @@ class TestThinMarginGate(unittest.TestCase):
         self.assertNotIn("thin_margin_no", reason)
 
     def test_flag_disabled(self):
-        """PUSH_SKIP_NO_MU_NEAR_BRACKET=False disables the gate."""
-        import config as _cfg
+        """PUSH_SKIP_NO_MU_NEAR_BRACKET=False disables the gate (now the live default)."""
         cand = _make_candidate("KXHIGHMIA-26MAY20-B88.5", "KMIA",
                                 "KXHIGH", "2026-05-20")
-        with mock.patch.object(_cfg, "PUSH_SKIP_NO_MU_NEAR_BRACKET", False):
-            executed, reason = self._run(cand, _make_packet(90.0),
-                                         _make_decision("BUY_NO"))
+        executed, reason = self._run(cand, _make_packet(90.0),
+                                     _make_decision("BUY_NO"), thin_margin=False)
         self.assertNotIn("thin_margin_no", reason)
 
     def test_default_band_widened_to_1_5(self):

@@ -818,10 +818,10 @@ PUSH_MIN_BUY_USD_LOW: float = 0.40
 # 2026-05-19 v3: BUY_YES needs a higher floor than BUY_NO. Analysis of 170 shadow
 # decisions showed 0/12 settled wins on BUY_YES at <15c entry (n=52 cohort,
 # MTM −$0.13/$). Cheap YES = market consensus near-zero; nn overconfident on tails.
-PUSH_MIN_ENTRY_C: int = 50           # 2026-05-28: REVERTED 30->50. Real fills (trades.jsonl n=142): <50c BLED -$182 (32%WR), >=50c +$37 (69%WR), 40-50c -$78. My 30c was an EVAL_PASS ARTIFACT (last-gate-row backed-out price drifts toward outcome). Real entry-price = ground truth. Original 50c (e5d6e01) is correct.
+PUSH_MIN_ENTRY_C: int = 25           # 2026-06-02 (Chris): 50->25 — $1 LIVE EXPERIMENT. The 50c floor was REAL-FILL validated (matcher era: <50c bled -$182/32%WR via eval->fill SLIPPAGE, eval 8c->fill 88c). BUT the bot now has a fresh-pricing guard (re-prices at fill, requires fresh edge >=6pp) which should catch that slippage trap, and sim says cheap-NO is +EV under the blend. At $1 the $-risk is trivial -> testing whether the fresh-pricing guard makes cheap-NO safe now. WATCH the Discord feed: if 25-50c NO fills bleed, revert ->50. (Prior: 30->50 5/28 real-fill revert.)
 PUSH_MIN_ENTRY_C_BUY_YES: int = 30   # BUY_YES needs >= 30c (raised from 25 per 2026-05-20 sweep — filters cheap-YES lottery)
 PUSH_MIN_ENTRY_C_LOW: int = 10       # 2026-05-28 (Chris): BUY_NO floor for the LOW book ONLY. The 50c PUSH_MIN_ENTRY_C is a HIGH-book finding (real fills); applied GLOBALLY it inverted on LOW — LOW NO went -$16.75 -> -$20.48 under the 50c floor (n=57). Restore LOW to its pre-e5d6e01 10c floor (HIGH-only floor). LOW remains net-negative overall = separate strategic question, not solved here.
-PUSH_MAX_ENTRY_C: int = 80
+PUSH_MAX_ENTRY_C: int = 90  # 2026-06-02 (Chris): 80->90 — $1 LIVE EXPERIMENT. Tests buying favorites (80-90c). Favorite-longshot bias is a real inefficiency (favorites underpriced +2.7/+4.4pp); sim says 80-95c NO is +EV under the blend. Risk = variance (one 90c loss = 9 wins) but bounded at $1. WATCH the feed; revert ->80 if 80-90c fills net-negative. Applies to NO+YES+LOW.
 
 # Tier 1 runtime gates — physics-catastrophic conditions where the nn matcher
 # (trained on normal-weather days) literally cannot work. Conservative
@@ -833,7 +833,7 @@ PUSH_MAX_ENTRY_C: int = 80
 # (wethr cache doesn't currently emit precip_in_h). Set to 999 / -1 to disable.
 PUSH_MIN_VSBY_MI: float = 0.5              # visibility < 0.5 mi (dense fog / heavy precip) → skip
 PUSH_MAX_WIND_MPH: float = 40.0            # sustained wind or gust > 40 mph (~35 kt) → skip
-PUSH_MAX_SPREAD_C_HIGH: float = 15.0       # 2026-05-23: skip HIGH push BUY when (yes_ask - yes_bid) > 15c. Crossing a wide spread pays away the edge; backtest HIGH spread>15c = -21..-31c/bet vs +1.9c filtered (both halves OOS). LOW NOT filtered (it is a $1 probe). 0 = off.
+PUSH_MAX_SPREAD_C_HIGH: float = 25.0       # 2026-06-02 (Chris): 15->25 — $1 LIVE EXPERIMENT. Crossing a wide spread is partly a mechanical cost (you pay ~half the spread), but the blend edge may clear it; sim says 15-40c spread is +EV under the blend. Testing at $1. WATCH the feed; revert ->15 if wide-spread fills bleed. (Prior 2026-05-23: 15c, matcher backtest -21..-31c/bet >15c.) LOW stays its own gate (PUSH_MAX_SPREAD_C_LOW). 0 = off.
 PUSH_MAX_SPREAD_C_LOW: float = 1.0         # 2026-06-02: skip LOW push BUY when (yes_ask - yes_bid) > 1c. Under the blend the LOW edge is liquidity-gated — faithful fwd-chain config sim: LOW BUY_NO at spread==1c +$154/n16/WR.75, spread==2c -$52/n12, 3c+ noise/neg (overnight KXLOW books thin → crossing >1c pays away the edge). Mirrors PUSH_MAX_SPREAD_C_HIGH (LOW lacked one from its $1-probe era). Thin n → ship-small/monitor. 0 = off (revert to unfiltered).
 
 # 2026-05-23: HIGH B-bracket BUY_NO thin-margin gate. Skip a BUY_NO on a 2-sided
@@ -853,7 +853,7 @@ PUSH_MAX_SPREAD_C_LOW: float = 1.0         # 2026-06-02: skip LOW push BUY when 
 # Distinct from the REVERTED p_yes median-bias correction: this only SKIPS a bet
 # (never shifts p_yes / flips a side), so it cannot turn a winner into a loser.
 # Set PUSH_SKIP_NO_MU_NEAR_BRACKET=False to revert.
-PUSH_SKIP_NO_MU_NEAR_BRACKET: bool = True
+PUSH_SKIP_NO_MU_NEAR_BRACKET: bool = False  # 2026-06-02 (Chris): DISABLED — $1 LIVE EXPERIMENT. "Don't short a B-bracket your own mu points into." Mechanism is sound BUT its CLI-offset (PUSH_NO_MU_CLI_OFFSET_*) is MATCHER-era (obs->CLI correction); the blend predicts CLI directly so the offset should be ~0, and the blend's calibrated sigma can make in-bracket NO +EV when the bracket holds <50% mass. Sim says removing it adds +12.4c/ct. Testing at $1. WATCH the feed; re-enable ->True if in-bracket NO shorts bleed. cf project_blend_edge_FOUND 6/2.
 PUSH_NO_MU_CLI_OFFSET_DEFAULT: float = 0.5
 PUSH_NO_MU_CLI_OFFSET_BY_STATION: dict = {
     "KATL": 0.1, "KAUS": 0.3, "KBOS": 0.9, "KDEN": 0.3, "KDFW": 0.0,
