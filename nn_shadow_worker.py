@@ -208,6 +208,50 @@ def _compute_blend_nwp(station, climate_day, side):
     return out
 
 
+def _compute_fc_min_hour(station, climate_day):
+    """Live hourly OpenMeteo forecast -> LOCAL hour of the day's forecast MIN.
+    Cached 1h. Returns None on any failure (caller skips the lock = current behavior)."""
+    key = (station, climate_day)
+    now = time.time()
+    c = _fc_minhour_cache.get(key)
+    if c and (now - c[0]) < 3600:
+        return c[1]
+    out = None
+    try:
+        import urllib.request, urllib.parse
+        import station_meta as _sm
+        meta = _sm.STATION_META.get(station)
+        apikey = _om_key()
+        if meta and apikey:
+            q = urllib.parse.urlencode({
+                "latitude": meta["lat"], "longitude": meta["lon"],
+                "past_days": 1, "forecast_days": 2, "hourly": "temperature_2m",
+                "temperature_unit": "fahrenheit", "timezone": "auto", "apikey": apikey})
+            url = "https://customer-api.open-meteo.com/v1/forecast?" + q
+            with urllib.request.urlopen(url, timeout=8) as r:
+                d = json.load(r)
+            hh = d.get("hourly", {}) or {}
+            times = hh.get("time", []) or []
+            temps = hh.get("temperature_2m", []) or []
+            best = None
+            for t, tv in zip(times, temps):
+                if tv is None or not str(t).startswith(climate_day):
+                    continue
+                try:
+                    hr = int(t[11:13]) + int(t[14:16]) / 60.0
+                except Exception:
+                    continue
+                if best is None or tv < best[0]:
+                    best = (tv, hr)
+            if best:
+                out = best[1]
+    except Exception:
+        out = None
+    _fc_minhour_cache[key] = (now, out)
+    return out
+
+
+_fc_minhour_cache: dict = {}
 _blend_log_ts = [0.0]
 def _compute_blend_override(cand, pkt, nn_res):
     """Return (mu, sigma) from the blend, or None to keep the matcher mu."""
@@ -236,6 +280,19 @@ def _compute_blend_override(cand, pkt, nn_res):
         if r is None and variant == "full":
             # graceful degradation: OpenMeteo fetch failed -> conservative blend
             r = blend_forecast.blend_mu(side, float(mkt), float(rm), float(curt), None, "conservative")
+        # LOW forecast-lock: when the hourly forecast says the daily low ALREADY
+        # occurred (forecast-min-time behind the eval time), the running-min IS the
+        # answer -> anchor mu to it instead of letting NWP over-predict a pre-dawn
+        # low that won't come. Backtest: LOW +11% (early-morning -$69->-$16; evening/
+        # pre-dawn untouched). FAIL-SAFE: no hourly/clock -> no lock = current behavior.
+        if (r is not None and side == "low"
+                and getattr(_cfg, "BLEND_LOW_FORECAST_LOCK_ENABLED", True)):
+            _lh = (pkt.get("local_clock") or {}).get("local_hour")
+            _fmh = _compute_fc_min_hour(cand.station, cand.climate_day)
+            _marg = float(getattr(_cfg, "BLEND_LOW_LOCK_MARGIN_H", 1.5))
+            if _lh is not None and _fmh is not None and _fmh < float(_lh) - _marg:
+                r = (round(float(rm), 2), r[1])
+                pkt["blend_low_locked"] = True
         if r is not None and (time.time() - _blend_log_ts[0]) > 60:
             _blend_log_ts[0] = time.time()
             try:

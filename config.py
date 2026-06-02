@@ -1225,5 +1225,13 @@ BLEND_FORECAST_LOW_ENABLED: bool = True
 # untested for lows). Set ENABLED=False to revert to the per-station windows.
 BLEND_DEEP_WINDOW_ENABLED: bool = True
 BLEND_DEEP_WINDOW_HOURS: tuple = (4.0, 2.5)
-BLEND_DEEP_WINDOW_HOURS_LOW: tuple = (3.0, 1.5)  # LOW: edge peaks ~min-2h (NOT deeper, unlike HIGH); window [min-3h, min-1.5h]. Small/noisy sample (~5mo). Models retrained at climo-min-2h.
+BLEND_DEEP_WINDOW_HOURS_LOW: tuple = (3.0, 1.5)
+# 2026-06-02: LOW forecast-lock. When the hourly forecast says the daily low already
+# happened (forecast-min-time > MARGIN_H behind the eval time), anchor mu to the
+# running-min (the locked low) instead of letting NWP over-predict a pre-dawn low.
+# Backtest: LOW +11% (fixes early-morning losers; evening/pre-dawn untouched). Small
+# sample (~90 bets). Needs hourly OM fetch (cached 1h); fail-safe -> no lock if absent.
+BLEND_LOW_FORECAST_LOCK_ENABLED: bool = True
+BLEND_LOW_LOCK_MARGIN_H: float = 1.5
+  # LOW: edge peaks ~min-2h (NOT deeper, unlike HIGH); window [min-3h, min-1.5h]. Small/noisy sample (~5mo). Models retrained at climo-min-2h.
           # LOW validated (+7.22c); False for HIGH-only
