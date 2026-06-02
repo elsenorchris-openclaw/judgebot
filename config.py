@@ -1221,3 +1221,18 @@ def apply_env() -> None:
 # Resolve once at import so anything reading the constants before main()
 # sees the right values for the default WALLET.
 _resolve_kalshi_auth()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 2026-06-02: supervised blend forecast (project_blend_edge_FOUND_20260601)
+# ─────────────────────────────────────────────────────────────────────────────
+# Overrides the obs-analog matcher mu with a ridge blend of market-implied mu +
+# live running-extreme + cur temp, predicted with a calibrated sigma (~1.1F HIGH /
+# ~1.4F LOW). Backtest (2024-10..2026-05, Kalshi settlement, FORWARD-CHAINED, net
+# of the taker fee, positive in EVERY forward month): HIGH +8.55c/ct, LOW +7.22c/ct.
+# Mechanism: the market is under-confident (implied sigma too wide) and under-weights
+# obs; a calibrated blend captures both. FAIL-SAFE: any missing input -> bot keeps
+# the matcher mu (never worse than today). Set ENABLED=False to fully revert.
+BLEND_FORECAST_ENABLED: bool = True
+BLEND_FORECAST_VARIANT: str = "conservative"   # "conservative"=market+obs (look-ahead-free, SHIPPED); "full"=+OpenMeteo NWP (+12.7c HIGH, needs live OM fetch, not yet wired)
+BLEND_FORECAST_LOW_ENABLED: bool = True          # LOW validated (+7.22c); False for HIGH-only

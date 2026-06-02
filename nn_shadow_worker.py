@@ -99,6 +99,73 @@ def _compute_nbm_high(station: str, climate_day: str):
     c = _mu_nwp_cache.get((station, climate_day))
     return c[2] if c and len(c) > 2 else None
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 2026-06-02: supervised blend-forecast mu override (project_blend_edge_FOUND).
+# Replaces the obs-analog matcher mu with a ridge blend of market-implied mu +
+# live running-extreme (wethr) + cur temp, predicted with a calibrated sigma.
+# Backtest (2024-10..2026-05, Kalshi settlement, FORWARD-CHAINED, net taker fee,
+# positive in EVERY forward month): HIGH +8.55c/ct, LOW +7.22c/ct.
+# FAIL-SAFE: every path returns None -> the caller keeps the matcher mu.
+# ─────────────────────────────────────────────────────────────────────────────
+_market_mu_cache: dict = {}
+
+def _compute_market_mu(station, climate_day, prefix):
+    """Ladder-implied mu (cents) from the live BBO cache for this station-day."""
+    key = (station, climate_day, prefix)
+    now = time.time()
+    c = _market_mu_cache.get(key)
+    if c and (now - c[0]) < 180:
+        return c[1]
+    mu = None
+    try:
+        import blend_forecast
+        import kalshi_ws as _kws
+        brackets = []
+        for tk in list(_kws._bbo_cache.keys()):
+            if not tk.startswith(prefix):
+                continue
+            c2 = market_universe.parse_ticker(tk)
+            if not c2 or c2.station != station or c2.climate_day != climate_day:
+                continue
+            bbo = _kws.get_bbo(tk)
+            if not bbo:
+                continue
+            yb = bbo.get("yes_bid"); ya = bbo.get("yes_ask")
+            if yb is None or ya is None:
+                continue
+            brackets.append({"kind": c2.bracket_kind, "floor": c2.floor, "cap": c2.cap,
+                             "yes_bid": yb * 100.0, "yes_ask": ya * 100.0})
+        mu = blend_forecast.implied_mu(brackets)
+    except Exception:
+        mu = None
+    _market_mu_cache[key] = (now, mu)
+    return mu
+
+def _compute_blend_override(cand, pkt, nn_res):
+    """Return (mu, sigma) from the blend, or None to keep the matcher mu."""
+    try:
+        if not getattr(_cfg, "BLEND_FORECAST_ENABLED", False):
+            return None
+        is_high = (cand.series_prefix == "KXHIGH")
+        if not is_high and not getattr(_cfg, "BLEND_FORECAST_LOW_ENABLED", False):
+            return None
+        import blend_forecast
+        side = "high" if is_high else "low"
+        variant = getattr(_cfg, "BLEND_FORECAST_VARIANT", "conservative")
+        mkt = _compute_market_mu(cand.station, cand.climate_day, cand.series_prefix)
+        if mkt is None:
+            return None
+        rm = pkt.get("running_min_or_max")
+        curt = (nn_res or {}).get("cur_tmpf")
+        if curt is None:
+            curt = pkt.get("cur_tmpf")
+        if rm is None or curt is None:
+            return None
+        return blend_forecast.blend_mu(side, float(mkt), float(rm), float(curt), None, variant)
+    except Exception:
+        return None
+
+
 log = logging.getLogger("judge.nn_shadow_worker")
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1753,6 +1820,13 @@ def _evaluate_ticker(ticker: str, trigger: str) -> None:
             pkt["mu_nwp"] = _mn
             pkt["nbm_high"] = _compute_nbm_high(cand.station, cand.climate_day)
             pkt["nwp_disagree"] = round(abs(pkt["mu_chosen"] - _mn), 2) if _mn is not None else None
+
+        # 2026-06-02: blend-forecast mu override (fail-safe -> keeps matcher mu).
+        _bov = _compute_blend_override(cand, pkt, nn_res)
+        if _bov is not None:
+            pkt["mu_pre_blend"] = pkt.get("mu_chosen")
+            pkt["mu_chosen"], pkt["sigma_chosen"] = _bov
+            pkt["mu_method"] = "blend_" + str(cand.series_prefix or "")
 
         # Per-series bet cap — single source of truth is the GUARDRAILS dict
         # (guardrails.check_buy enforces the same numbers downstream; sizing
