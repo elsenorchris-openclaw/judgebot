@@ -679,7 +679,7 @@ PUSH_HIGH_TEMP_WINDOW_BY_STATION = {
 # it -- it falls back to the global PUSH_HIGH_TEMP_WINDOW window. Benching needs this set.
 # KSFO was benched here 2026-05-25 then RE-ENABLED same day at the $3 default: the bench
 # wasn't OOS-robust (SFO is a sign-flip across the early/late split, not a structural -EV edge).
-PUSH_HIGH_DISABLED_STATIONS = frozenset({"KLAS"})  # 2026-05-30 (Chris): bench KLAS HIGH. NN-era 5/19-29 realized 0/7 / -$80; matcher systematically HOT at Las Vegas (mu>=90F -> 0/7, binomial p=0.029). Most of the $ is pre-5/27-sizefix bug-era (post-fix ~flat) so treat as cheap tail-insurance, NOT proven alpha; KLAS has never net-profited judge HIGH. Rollback = frozenset(). cf 5/30 deep-dive.
+PUSH_HIGH_DISABLED_STATIONS = frozenset()  # 2026-06-02 (Chris): UNBENCHED KLAS — STALE under the blend. KLAS was benched for the MATCHER running hot (mu>=90F -> 0/7). The BLEND is the MOST accurate station: MAE 0.74F (vs 0.94F avg) and bias +0.16F (unbiased, NOT hot). The bench was suppressing the matcher's weakness, not a real KLAS problem. Re-add {"KLAS"} to revert. cf project_blend_edge_FOUND 6/2.  # (prior 2026-05-30: benched KLAS, matcher hot p=.029)
 
 # 2026-05-22: LOW placeholder window (analog to PUSH_HIGH_TEMP_WINDOW). The
 # MAE-built LOW overrides open too deep pre-min (h2pk>=2.0 = 40% WR in faithful
@@ -791,7 +791,7 @@ PUSH_MIN_EDGE_PP_YES: int = 2  # 2026-06-02 (Chris): 12->2 AGGRESSIVE (paired w/
 # sigma transform separates winners from losers; this hard cell gate does).
 # Fail-OPEN: unknown cell (n<20 or not in table) -> NOT gated.
 # Rollback: PUSH_MAE_GATE_ENABLED=False.
-PUSH_MAE_GATE_ENABLED: bool = True
+PUSH_MAE_GATE_ENABLED: bool = False  # 2026-06-02 (Chris): DISABLED — STALE under the blend. This gates cells by the MATCHER's historical MAE, but mu now comes from the blend, which forecasts the "high-matcher-MAE" cells JUST AS ACCURATELY as the easy ones (direct check: blend MAE 0.97F on gated cells vs 0.91F allowed, p90 2.02 vs 1.93 — near-identical; the matcher found them hard because it's obs-only, the blend has NWP). It was blocking ~39 trades/mo the blend prices fine. Re-enable ->True to restore. cf project_blend_edge_FOUND 6/2 gate ablation.
 PUSH_MAE_GATE_F: float = 2.0
 
 # In-bracket tail-bet gate (Gate 2). When the nn mu sits INSIDE the YES window
@@ -926,7 +926,7 @@ PUSH_HIGH_NO_MAX_SIGMA_F: float = 2.5
 # backtest @judge lead (CLI settle): band = -5..-15c/bet WR.44-.58, DISTINCT from the
 # mu thin-margin gate (catches matcher-cold/mu-far cases it misses); kept book flips +.
 # THIN n (~26 incremental settled bets; v1 no OOS half) -> behind this flag. False=revert.
-PUSH_HIGH_NO_NBM_VETO_ENABLED: bool = True
+PUSH_HIGH_NO_NBM_VETO_ENABLED: bool = False  # 2026-06-02 (Chris): DISABLED — REDUNDANT under the blend. This vetoes BUY_NO when NBM's daily-high lands in/near the bracket; it existed because the MATCHER (obs-only) under-projected hot days and needed an independent NWP check. But the blend mu ALREADY incorporates the 7-model NWP, so vetoing on the raw NWP double-counts the same signal the blend weighed. Re-enable ->True to restore. cf project_blend_edge_FOUND 6/2.
 PUSH_HIGH_NO_NBM_VETO_LO_MARGIN_F: float = 2.0
 
 # (2h) HIGH off-peak ENTRY veto (JUDGE-ONLY, 2026-05-31 deep-dive). Skip a NEW HIGH
