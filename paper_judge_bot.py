@@ -4062,6 +4062,11 @@ def execute_buy(rt: Runtime, cand: market_universe.Candidate,
         "entry_ts_epoch": rt.ctx.now_utc,
         # Origin tag — used by exit loop to refuse selling another bot's position.
         "opened_by": "paper-judge",
+        # 2026-06-02: tag the forecast source so the daily settled-P&L readout can
+        # split BLEND ("blend_*") vs the nn_match fallback ("nn_match_*") realized P&L.
+        "mu_method": packet.get("mu_method"),
+        "sigma_chosen": packet.get("sigma_chosen"),
+        "mu_chosen": packet.get("mu_chosen"),
         # Series + bracket kind + market price + extracted prob + gap.
         # Lets us run the same winner/loser analysis on actual BUYs that we
         # already run on shadow_trades (see scripts/r2_compare.py).
