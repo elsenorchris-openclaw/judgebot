@@ -535,7 +535,7 @@ PUSH_LOW_POST_AT_MID: bool = True
 PUSH_LOW_POST_TTL_S: int = 90
 PUSH_LOW_POST_POST_ONLY: bool = True
 PUSH_LOW_POST_ADVERSE_C: int = 3   # belt: per-cycle early-cancel if our side's mid fell >= this many c below post
-PUSH_HIGH_MAX_BET_DEFAULT: float = 10.0  # 2026-05-28 (Chris): raised 6->10 default after 5/27 +$105 combined day showed judge under-sized when matcher was right (judge +$18 on $57 cost = +32% ROI vs v1max +$88 on $135 = +65%; judge's biggest realized winners MIA YES/MSY/PHX were all sized at the de-sized/YES floor $2.76-$3.60). Only BOS/SEA stay $15 via PUSH_HIGH_MAX_BET_BY_STATION. NOTE cascade (edge-band sizes relative to this): 18-26pp up-tilt -> min($15, 10*2)=$15 (now CLIPS at the guardrail = same effective size as skill tier); fat >=26pp de-size -> 10*0.5=$5. (6->10 on 5/28; 3->6 on 5/27; 5->3 on 5/25; $5 uniform 5/23.)
+PUSH_HIGH_MAX_BET_DEFAULT: float = 5.0  # 2026-05-28 (Chris): raised 6->10 default after 5/27 +$105 combined day showed judge under-sized when matcher was right (judge +$18 on $57 cost = +32% ROI vs v1max +$88 on $135 = +65%; judge's biggest realized winners MIA YES/MSY/PHX were all sized at the de-sized/YES floor $2.76-$3.60). Only BOS/SEA stay $15 via PUSH_HIGH_MAX_BET_BY_STATION. NOTE cascade (edge-band sizes relative to this): 18-26pp up-tilt -> min($15, 10*2)=$15 (now CLIPS at the guardrail = same effective size as skill tier); fat >=26pp de-size -> 10*0.5=$5. (6->10 on 5/28; 3->6 on 5/27; 5->3 on 5/25; $5 uniform 5/23.)
 PUSH_HIGH_MAX_BET_BY_STATION = {
     # 2026-05-25 (Chris): BOS + SEA sized to $15 -- the ONLY two stations whose
     # matcher actually beats the market on Brier (last-month, h2pk 2-5: BOS
