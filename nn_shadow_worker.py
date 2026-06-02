@@ -1107,6 +1107,16 @@ def _try_auto_execute(cand, packet: dict, decision: dict,
     direction = decision.get("decision", "")  # "BUY_NO" or "BUY_YES"
     if direction not in ("BUY_NO", "BUY_YES"):
         return False, "not_a_buy"
+    # (Gate 0) BLEND-ONLY EXECUTION (2026-06-02, Chris). Only place orders when the
+    # forecast came from the BLEND (the validated edge, mu_method="blend_*"). The
+    # nn_match matcher still runs as a shadow/fallback mu (and is logged) but does
+    # NOT trade -- it has no proven live edge, and it only becomes the active mu when
+    # _compute_market_mu is None, i.e. on thin/illiquid or post-peak markets where the
+    # blend can't price and there's no edge anyway. Reversible: BLEND_ONLY_EXECUTION=False.
+    if getattr(_cfg, "BLEND_ONLY_EXECUTION", True):
+        _mm = str(packet.get("mu_method") or "")
+        if not _mm.startswith("blend_"):
+            return False, f"blend_only: mu_method={_mm or 'none'} (matcher fallback not executed)"
     short_dir = "NO" if direction == "BUY_NO" else "YES"
     # (Gate 2) Edge floor — bot only fires above PUSH_MIN_EDGE_PP. The
     # nn_shadow_strategy.pure_nn_decide internal floor stays at 6pp so the

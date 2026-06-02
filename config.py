@@ -1247,5 +1247,12 @@ BLEND_LOW_LOCK_MARGIN_H: float = 1.5
 # When True, blend rows fall back to the global PUSH_HIGH_NO_MIN_SIGMA_F (=1.0,
 # which 1.17 clears); matcher rows keep the per-station floors. False = revert.
 BLEND_EXEMPT_HIGH_SIGMA_FLOOR: bool = True
+# 2026-06-02 (Chris): BLEND-ONLY EXECUTION. Only place orders when mu came from the
+# BLEND (mu_method="blend_*"). The nn_match matcher still runs as a shadow/fallback
+# mu but does NOT trade -- it has no proven live edge and only becomes active when
+# the blend can't compute a market-implied mu (thin/illiquid or post-peak markets,
+# where there's no edge anyway). All 8 trades on 2026-06-02 were matcher (the blend
+# was dead-gated until be6402a, then fell back on a thin evening market). False reverts.
+BLEND_ONLY_EXECUTION: bool = True
   # LOW: edge peaks ~min-2h (NOT deeper, unlike HIGH); window [min-3h, min-1.5h]. Small/noisy sample (~5mo). Models retrained at climo-min-2h.
           # LOW validated (+7.22c); False for HIGH-only
