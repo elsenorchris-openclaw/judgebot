@@ -140,5 +140,45 @@ class TestSigmaFloorBlendExempt(_Base):
         self.assertIn("sigma_floor_no", reason)
 
 
+class TestBlendOnlyExecution(_Base):
+    """2026-06-02: only execute when mu came from the blend (mu_method='blend_*');
+    the nn_match matcher fallback must not place orders. (conftest disables this gate
+    for the suite by default; here we re-enable it explicitly.)"""
+    def _pkt(self, mu_method):
+        return {"yes_ask_c": 50, "no_ask_c": 50, "seconds_to_close": 10_000,
+                "mu_chosen": 92.0, "floor": 88.0, "cap": 89.0, "sigma_chosen": 1.17,
+                "mu_method": mu_method, "local_clock": {"h_to_peak": 2.0}}
+
+    def test_matcher_mu_blocked(self):
+        import config as _cfg
+        cand = _cand("KXHIGHMIA-26MAY20-B88.5", "KMIA")
+        with mock.patch.object(_cfg, "BLEND_ONLY_EXECUTION", True):
+            ok, reason = self._run(cand, self._pkt("nn_match_high_n50"), _decision("BUY_NO"))
+        self.assertFalse(ok)
+        self.assertIn("blend_only", reason)
+
+    def test_none_mu_method_blocked(self):
+        import config as _cfg
+        cand = _cand("KXHIGHMIA-26MAY20-B88.5", "KMIA")
+        with mock.patch.object(_cfg, "BLEND_ONLY_EXECUTION", True):
+            ok, reason = self._run(cand, self._pkt(None), _decision("BUY_NO"))
+        self.assertFalse(ok)
+        self.assertIn("blend_only", reason)
+
+    def test_blend_mu_passes_gate0(self):
+        import config as _cfg
+        cand = _cand("KXHIGHMIA-26MAY20-B88.5", "KMIA")
+        with mock.patch.object(_cfg, "BLEND_ONLY_EXECUTION", True):
+            ok, reason = self._run(cand, self._pkt("blend_KXHIGH"), _decision("BUY_NO"))
+        self.assertNotIn("blend_only", reason)   # passes gate 0; may stop at a later gate
+
+    def test_flag_off_allows_matcher(self):
+        import config as _cfg
+        cand = _cand("KXHIGHMIA-26MAY20-B88.5", "KMIA")
+        with mock.patch.object(_cfg, "BLEND_ONLY_EXECUTION", False):
+            ok, reason = self._run(cand, self._pkt("nn_match_high_n50"), _decision("BUY_NO"))
+        self.assertNotIn("blend_only", reason)
+
+
 if __name__ == "__main__":
     unittest.main()
