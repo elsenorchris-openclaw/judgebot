@@ -362,6 +362,36 @@ def discord_send(msg: str) -> None:
     log.debug("discord skipped (no transport configured): %s", msg[:120])
 
 
+def notify_trade(msg: str) -> None:
+    """Post a BUY or ERROR notification to the dedicated trade channel
+    (config.DISCORD_TRADE_CHANNEL_ID, default 1511264871151304725) via the bot
+    token — a clean buys+errors feed, separate from the general discord_send
+    channel (skips/heartbeat/ops alerts). Falls back to discord_send if the
+    trade channel/token isn't configured so the event is never lost. Never
+    raises — a Discord outage must not affect trading. (2026-06-02, Chris)"""
+    try:
+        import httpx
+    except ImportError:
+        return
+    chan = getattr(config, "DISCORD_TRADE_CHANNEL_ID", "") or ""
+    token = getattr(config, "DISCORD_BOT_TOKEN", "") or ""
+    if not (chan and token):
+        try:
+            discord_send(msg)
+        except Exception:
+            pass
+        return
+    url = f"https://discord.com/api/v10/channels/{chan}/messages"
+    for c in _discord_chunks(msg):
+        try:
+            httpx.post(url, json={"content": c},
+                       headers={"Authorization": f"Bot {token}",
+                                "Content-Type": "application/json"}, timeout=5.0)
+        except Exception as e:
+            log.warning("notify_trade send failed: %s", e)
+            return
+
+
 def _install_crash_alerts() -> None:
     """Route uncaught exceptions (main thread + background threads) to Discord (throttled)."""
     import sys as _sys, traceback as _tb, os as _os, time as _t, threading as _th
@@ -374,7 +404,9 @@ def _install_crash_alerts() -> None:
         _last[0] = now
         try:
             tbstr = "".join(_tb.format_exception(et, ev, tb))[-1500:]
-            discord_send("CRASH [%s] uncaught in %s:\n```\n%s\n```" % (_label, where, tbstr))
+            _cmsg = "🛑 CRASH [%s] uncaught in %s:\n```\n%s\n```" % (_label, where, tbstr)
+            discord_send(_cmsg)
+            notify_trade(_cmsg)   # errors -> Chris's buys+errors channel
         except Exception:
             pass
     _prev = _sys.excepthook
@@ -3885,10 +3917,10 @@ def execute_buy(rt: Runtime, cand: market_universe.Candidate,
             actual_cost = actual_cost2
         else:
             state.release_ticker(cand.ticker)
-            discord_send(
-                f"❌ **{decision.decision}** FAILED `{cand.ticker}` "
-                f"({cnt}x @ {ask_c}c) — {err_code}: {err_msg[:120]}"
-            )
+            _ff = (f"❌ **{decision.decision}** FAILED `{cand.ticker}` "
+                   f"({cnt}x @ {ask_c}c) — {err_code}: {err_msg[:120]}")
+            discord_send(_ff)
+            notify_trade(_ff)   # trade error -> buys+errors channel
             return
 
     order_id = order_resp.get("order_id")
@@ -3910,11 +3942,11 @@ def execute_buy(rt: Runtime, cand: market_universe.Candidate,
         if not config.DRY_RUN:
             kalshi_client.cancel_order(order_id)
         state.release_ticker(cand.ticker)
-        discord_send(
-            f"⚠️ **{decision.decision}** NOT FILLED on `{cand.ticker}` "
-            f"({cnt}x @ {ask_c}c, status={status}) — order cancelled. "
-            f"conv={decision.conviction:.2f}: {decision.read}"
-        )
+        _nf = (f"⚠️ **{decision.decision}** NOT FILLED on `{cand.ticker}` "
+               f"({cnt}x @ {ask_c}c, status={status}) — order cancelled. "
+               f"conv={decision.conviction:.2f}: {decision.read}")
+        discord_send(_nf)
+        notify_trade(_nf)   # trade error -> buys+errors channel
         return
     # Partial fill: cancel the resting remainder so we don't get filled at
     # a worse price later if the market moves against us. The bot may
@@ -4051,6 +4083,38 @@ def execute_buy(rt: Runtime, cand: market_universe.Candidate,
         f"✅ **{decision.decision}** {filled}x @ {ask_c}c on `{cand.ticker}` "
         f"(${filled_cost:.2f}, conv={decision.conviction:.2f}): {decision.read}{_nwp_txt}"
     )
+    # 2026-06-02 (Chris): rich BUY notification to the dedicated trade channel,
+    # with all useful info incl. TIME-TO-PEAK. Wrapped so a formatting slip can
+    # never break the buy path.
+    try:
+        _lc = packet.get("local_clock") or {}
+        _h2p = _lc.get("h_to_peak")
+        _h2p_txt = (f"{float(_h2p):+.1f}h" if isinstance(_h2p, (int, float)) else "n/a")
+        _lh = _lc.get("local_hour")
+        _lh_txt = (f"{float(_lh):.1f}h LST" if isinstance(_lh, (int, float)) else "?")
+        _src = "BLEND" if packet.get("mu_pre_blend") is not None else "matcher"
+        _mu = packet.get("mu_chosen"); _sg = packet.get("sigma_chosen")
+        _rext = packet.get("running_min_or_max")
+        _peakkind = "min" if cand.series_prefix == "KXLOW" else "peak"
+        if cand.floor is not None and cand.cap is not None:
+            _brk = f"[{cand.floor:g}–{cand.cap:g}]"
+        elif cand.floor is not None:
+            _brk = f"≥{cand.floor:g}"
+        elif cand.cap is not None:
+            _brk = f"≤{cand.cap:g}"
+        else:
+            _brk = ""
+        _edge_txt = (f"{gap_pp_buy:+.1f}pp" if gap_pp_buy is not None else "n/a")
+        _muf = (f"{float(_mu):.1f}°F" if isinstance(_mu, (int, float)) else str(_mu))
+        _sgf = (f"{float(_sg):.2f}" if isinstance(_sg, (int, float)) else str(_sg))
+        notify_trade(
+            f"✅ **{decision.decision}** `{cand.ticker}`  {cand.station} {cand.climate_day} {_brk}\n"
+            f"• filled **{filled}x @ {ask_c}c = ${filled_cost:.2f}**  |  edge {_edge_txt}  |  conv {decision.conviction:.2f}\n"
+            f"• forecast μ={_muf} σ={_sgf} ({_src})  |  obs {_peakkind}-so-far {_rext}{_nwp_txt}\n"
+            f"• ⏱ **time-to-{_peakkind} {_h2p_txt}**  (entered {_lh_txt})"
+        )
+    except Exception as _e:
+        log.warning("notify_trade(buy) failed: %s", _e)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

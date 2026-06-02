@@ -1005,6 +1005,10 @@ LLM_DISPATCH_MODE: str = "off"
 DISCORD_WEBHOOK_URL: str = os.environ.get("DISCORD_WEBHOOK_URL", "")
 DISCORD_BOT_TOKEN: str = os.environ.get("DISCORD_BOT_TOKEN", "")
 DISCORD_CHANNEL_ID: str = os.environ.get("DISCORD_CHANNEL_ID", "")
+# 2026-06-02 (Chris): dedicated channel for BUYS + ERRORS only (notify_trade),
+# separate from the general DISCORD_CHANNEL_ID feed (skips/heartbeat/ops alerts).
+# Posted via DISCORD_BOT_TOKEN (channel-ID REST path). Override via env if needed.
+DISCORD_TRADE_CHANNEL_ID: str = os.environ.get("DISCORD_TRADE_CHANNEL_ID", "1511264871151304725")
 DISCORD_PING_USER_ID: str = os.environ.get("DISCORD_PING_USER_ID", "")  # optional @
 DISCORD_NOTIFY_ON_SKIP_CONVICTION = 0.6
 
@@ -1190,12 +1194,13 @@ def apply_env() -> None:
     # Refresh module-level vars that may have been read before .env loaded.
     global ANTHROPIC_API_KEY, CLAUDE_CLI_PATH
     global DISCORD_WEBHOOK_URL, DISCORD_PING_USER_ID
-    global DISCORD_BOT_TOKEN, DISCORD_CHANNEL_ID
+    global DISCORD_BOT_TOKEN, DISCORD_CHANNEL_ID, DISCORD_TRADE_CHANNEL_ID
     ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", ANTHROPIC_API_KEY)
     CLAUDE_CLI_PATH = os.environ.get("CLAUDE_CLI_PATH", CLAUDE_CLI_PATH)
     DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL", DISCORD_WEBHOOK_URL)
     DISCORD_BOT_TOKEN = os.environ.get("DISCORD_BOT_TOKEN", DISCORD_BOT_TOKEN)
     DISCORD_CHANNEL_ID = os.environ.get("DISCORD_CHANNEL_ID", DISCORD_CHANNEL_ID)
+    DISCORD_TRADE_CHANNEL_ID = os.environ.get("DISCORD_TRADE_CHANNEL_ID", DISCORD_TRADE_CHANNEL_ID)
     DISCORD_PING_USER_ID = os.environ.get("DISCORD_PING_USER_ID", DISCORD_PING_USER_ID)
     _resolve_kalshi_auth()
 
