@@ -29,7 +29,8 @@ class TestEarlyTrim(unittest.TestCase):
              mock.patch.object(cfg, "PUSH_EARLY_TRIM_MAE_MAX", mmax), \
              mock.patch.object(cfg, "PUSH_HIGH_TEMP_WINDOW", None), \
              mock.patch.object(cfg, "PUSH_LOW_TEMP_WINDOW", None), \
-             mock.patch.object(cfg, "USE_PUSH_WINDOW_OVERRIDES", True):
+             mock.patch.object(cfg, "USE_PUSH_WINDOW_OVERRIDES", True), \
+             mock.patch.object(cfg, "BLEND_DEEP_WINDOW_ENABLED", False):
             return nsw._in_decision_window(station, series, local_hour, "2026-05-21")
 
     def test_high_accurate_wide_gets_trimmed(self):
@@ -91,6 +92,19 @@ class TestEarlyTrim(unittest.TestCase):
         # 13.5 is past the (negative-after) close -> out
         ok2, _ = self._win(ov, "KLAX", "HIGH", 13.5)
         self.assertFalse(ok2)
+
+
+    def test_blend_deep_window_override(self):
+        """When BLEND active, HIGH window forced to [peak-4, peak-2.5] over the table."""
+        import push_window_overrides as pwo
+        with mock.patch.object(pwo, "PUSH_WINDOW_OVERRIDES", {("KATL","HIGH",5):(1.0,0.5)}), \
+             mock.patch.object(cfg, "USE_PUSH_WINDOW_OVERRIDES", True), \
+             mock.patch.object(cfg, "PUSH_HIGH_TEMP_WINDOW", None), \
+             mock.patch.object(cfg, "BLEND_FORECAST_ENABLED", True), \
+             mock.patch.object(cfg, "BLEND_DEEP_WINDOW_ENABLED", True), \
+             mock.patch.object(cfg, "BLEND_DEEP_WINDOW_HOURS", (4.0, 2.5)):
+            self.assertTrue(nsw._in_decision_window("KATL","HIGH",11.0,"2026-05-21")[0])
+            self.assertFalse(nsw._in_decision_window("KATL","HIGH",13.5,"2026-05-21")[0])
 
 
 if __name__ == "__main__":

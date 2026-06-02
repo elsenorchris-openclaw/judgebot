@@ -42,7 +42,8 @@ class TestPushWindowOverrides(unittest.TestCase):
         with mock.patch.dict("sys.modules"):
             import importlib
             cfg = importlib.import_module("config")
-            with mock.patch.object(cfg, "USE_PUSH_WINDOW_OVERRIDES", True):
+            with mock.patch.object(cfg, "USE_PUSH_WINDOW_OVERRIDES", True), \
+                 mock.patch.object(cfg, "BLEND_DEEP_WINDOW_ENABLED", False):
                 ok, dbg = nsw._in_decision_window("KATL", "HIGH", 15.2,
                                                   "2026-05-19")
         self.assertTrue(ok, dbg)
@@ -61,7 +62,8 @@ class TestPushWindowOverrides(unittest.TestCase):
         with mock.patch.dict("sys.modules"):
             import importlib
             cfg = importlib.import_module("config")
-            with mock.patch.object(cfg, "USE_PUSH_WINDOW_OVERRIDES", True):
+            with mock.patch.object(cfg, "USE_PUSH_WINDOW_OVERRIDES", True), \
+                 mock.patch.object(cfg, "BLEND_DEEP_WINDOW_ENABLED", False):
                 ok, dbg = nsw._in_decision_window("KATL", "HIGH", 18.0,
                                                   "2026-05-19")
         self.assertFalse(ok, dbg)
@@ -92,6 +94,7 @@ class TestPushWindowOverrides(unittest.TestCase):
             import importlib
             cfg = importlib.import_module("config")
             with mock.patch.object(cfg, "USE_PUSH_WINDOW_OVERRIDES", True), \
+                 mock.patch.object(cfg, "BLEND_DEEP_WINDOW_ENABLED", False), \
                  mock.patch.object(pwo, "PUSH_WINDOW_OVERRIDES", {}):
                 ok, dbg = nsw._in_decision_window("KATL", "LOW", 5.0, "2026-05-19")
                 nsw._in_decision_window("KATL", "LOW", 5.0, "2026-05-19")  # dedup
@@ -106,7 +109,8 @@ class TestPushWindowOverrides(unittest.TestCase):
         with mock.patch.dict("sys.modules"):
             import importlib
             cfg = importlib.import_module("config")
-            with mock.patch.object(cfg, "USE_PUSH_WINDOW_OVERRIDES", True):
+            with mock.patch.object(cfg, "USE_PUSH_WINDOW_OVERRIDES", True), \
+                 mock.patch.object(cfg, "BLEND_DEEP_WINDOW_ENABLED", False):
                 ok, dbg = nsw._in_decision_window("KATL", "HIGH", 14.0,
                                                   "2026-01-15")
         self.assertIn("src=window_table", dbg)
@@ -188,11 +192,12 @@ class TestPerStationTempWindow(unittest.TestCase):
         self._s = mock.patch.object(_c, "PUSH_HIGH_TEMP_WINDOW_BY_STATION",
                                     {"KAUS": (1.5, -1.0)})
         self._u = mock.patch.object(_c, "USE_PUSH_WINDOW_OVERRIDES", True)
-        self._g.start(); self._s.start(); self._u.start()
+        self._d = mock.patch.object(_c, "BLEND_DEEP_WINDOW_ENABLED", False)
+        self._g.start(); self._s.start(); self._u.start(); self._d.start()
 
     def tearDown(self):
         nsw._lookup_peak_hour = self._orig
-        self._g.stop(); self._s.stop(); self._u.stop()
+        self._g.stop(); self._s.stop(); self._u.stop(); self._d.stop()
 
     def _win(self, station, hour):
         ok, dbg = nsw._in_decision_window(station, "HIGH", hour, "2026-05-19")

@@ -987,6 +987,16 @@ def _in_decision_window(station: str, series: str, local_hour: float,
         if float(win[3]) < _mae_max and before > _eff_cap:
             _trim_dbg = f" early_trim:before {before}->{_eff_cap}(mae={win[3]})"
             before = _eff_cap
+    # 2026-06-02: blend deep-window override (project_blend_edge_FOUND). The blend
+    # edge is concentrated 2.5-4h before peak (market soft far from peak, sharp into
+    # it); near/post-peak ~dead. When the blend is active, trade HIGH only in the
+    # deep window, overriding the table windows. Backtest (climo-peak, fwd-chain,
+    # $10 liquid): -3h +$3257/WR.59 vs -2h +$1980 vs -1h +$280/WR.37.
+    if (series == "HIGH" and getattr(_cfg, "BLEND_FORECAST_ENABLED", False)
+            and getattr(_cfg, "BLEND_DEEP_WINDOW_ENABLED", True)):
+        _dwh = getattr(_cfg, "BLEND_DEEP_WINDOW_HOURS", (4.0, 2.5))
+        before, after = float(_dwh[0]), -float(_dwh[1])
+        _trim_dbg += f" blend_deep[peak-{_dwh[0]},peak-{_dwh[1]}]"
     lo = peak - before
     hi = peak + after
     ok = (lo <= local_hour <= hi)

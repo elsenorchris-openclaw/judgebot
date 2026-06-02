@@ -1216,4 +1216,13 @@ _resolve_kalshi_auth()
 # the matcher mu (never worse than today). Set ENABLED=False to fully revert.
 BLEND_FORECAST_ENABLED: bool = True
 BLEND_FORECAST_VARIANT: str = "full"   # "conservative"=market+obs (look-ahead-free, SHIPPED); "full"=+OpenMeteo NWP (+12.7c HIGH, needs live OM fetch, not yet wired)
-BLEND_FORECAST_LOW_ENABLED: bool = True          # LOW validated (+7.22c); False for HIGH-only
+BLEND_FORECAST_LOW_ENABLED: bool = True
+# 2026-06-02: blend deep-window — concentrate HIGH trading 2.5-4h before peak,
+# where the blend edge is 2-3x bigger (market soft far from peak, sharp into it).
+# Overrides the per-station window tables when BLEND_FORECAST_ENABLED. HOURS =
+# (before_open, before_close) => window [peak-4h, peak-2.5h]. Models retrained at
+# this deep lead (climo-peak-3h) for serve-consistency. LOW unchanged (deep-lead
+# untested for lows). Set ENABLED=False to revert to the per-station windows.
+BLEND_DEEP_WINDOW_ENABLED: bool = True
+BLEND_DEEP_WINDOW_HOURS: tuple = (4.0, 2.5)
+          # LOW validated (+7.22c); False for HIGH-only
