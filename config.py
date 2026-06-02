@@ -834,6 +834,7 @@ PUSH_MAX_ENTRY_C: int = 80
 PUSH_MIN_VSBY_MI: float = 0.5              # visibility < 0.5 mi (dense fog / heavy precip) → skip
 PUSH_MAX_WIND_MPH: float = 40.0            # sustained wind or gust > 40 mph (~35 kt) → skip
 PUSH_MAX_SPREAD_C_HIGH: float = 15.0       # 2026-05-23: skip HIGH push BUY when (yes_ask - yes_bid) > 15c. Crossing a wide spread pays away the edge; backtest HIGH spread>15c = -21..-31c/bet vs +1.9c filtered (both halves OOS). LOW NOT filtered (it is a $1 probe). 0 = off.
+PUSH_MAX_SPREAD_C_LOW: float = 1.0         # 2026-06-02: skip LOW push BUY when (yes_ask - yes_bid) > 1c. Under the blend the LOW edge is liquidity-gated — faithful fwd-chain config sim: LOW BUY_NO at spread==1c +$154/n16/WR.75, spread==2c -$52/n12, 3c+ noise/neg (overnight KXLOW books thin → crossing >1c pays away the edge). Mirrors PUSH_MAX_SPREAD_C_HIGH (LOW lacked one from its $1-probe era). Thin n → ship-small/monitor. 0 = off (revert to unfiltered).
 
 # 2026-05-23: HIGH B-bracket BUY_NO thin-margin gate. Skip a BUY_NO on a 2-sided
 # (B) bracket when the CLI-adjusted forecast (mu - per-station obs->CLI offset)
@@ -1233,5 +1234,13 @@ BLEND_DEEP_WINDOW_HOURS_LOW: tuple = (3.0, 1.5)
 # sample (~90 bets). Needs hourly OM fetch (cached 1h); fail-safe -> no lock if absent.
 BLEND_LOW_FORECAST_LOCK_ENABLED: bool = True
 BLEND_LOW_LOCK_MARGIN_H: float = 1.5
+# 2026-06-02: exempt blend HIGH BUY_NO from the matcher-era per-station σ-FLOORS
+# (PUSH_HIGH_NO_MIN_SIGMA_BY_STATION). Those floors (1.34-2.26) filtered the
+# matcher's variable, over-confident σ; the blend emits a fixed calibrated σ≈1.17
+# that is BELOW all 7, so they silently bench HIGH BUY_NO at KPHX/KSAT/KOKC/KLAX/
+# KSEA/KMIA/KMDW under the blend (~+$110 left on the table in the faithful sim).
+# When True, blend rows fall back to the global PUSH_HIGH_NO_MIN_SIGMA_F (=1.0,
+# which 1.17 clears); matcher rows keep the per-station floors. False = revert.
+BLEND_EXEMPT_HIGH_SIGMA_FLOOR: bool = True
   # LOW: edge peaks ~min-2h (NOT deeper, unlike HIGH); window [min-3h, min-1.5h]. Small/noisy sample (~5mo). Models retrained at climo-min-2h.
           # LOW validated (+7.22c); False for HIGH-only

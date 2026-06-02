@@ -1245,6 +1245,19 @@ def _try_auto_execute(cand, packet: dict, decision: dict,
             _yb = packet.get("yes_bid_c"); _ya = packet.get("yes_ask_c")
             if _yb is not None and _ya is not None and (_ya - _yb) > _msp:
                 return False, f"spread_too_wide {_ya - _yb:.0f}c>{_msp:.0f}c"
+    # (2-spread-low) LOW spread gate (2026-06-02). Under the blend the LOW edge is
+    # liquidity-gated: faithful fwd-chain sim of the live config shows LOW BUY_NO
+    # at spread==1c = +$154/n16/WR.75, but spread>=2c flips negative (2c -$52/n12,
+    # 3c+ noise/neg). Overnight KXLOW books are thin; crossing a >1c spread pays
+    # away the edge + adverse selection. Mirror of the HIGH spread gate (which the
+    # LOW book lacked from its "$1 probe" era). Thin n -> ship-small/monitor;
+    # PUSH_MAX_SPREAD_C_LOW=0 disables. cf project_blend_edge_FOUND 2026-06-02.
+    if series == "LOW":
+        _msp_low = float(getattr(_cfg, "PUSH_MAX_SPREAD_C_LOW", 0) or 0)
+        if _msp_low > 0:
+            _yb = packet.get("yes_bid_c"); _ya = packet.get("yes_ask_c")
+            if _yb is not None and _ya is not None and (_ya - _yb) > _msp_low:
+                return False, f"spread_too_wide_low {_ya - _yb:.0f}c>{_msp_low:.0f}c"
     # (2d) HIGH-only thin-margin BUY_NO gate. Skip a B-bracket BUY_NO when the
     # CLI-adjusted forecast (mu - per-station obs->CLI offset) lands INSIDE the
     # bracket [floor - band, cap + band] -- shorting a bracket our own mu points
@@ -1298,7 +1311,20 @@ def _try_auto_execute(cand, packet: dict, decision: dict,
         # matcher σ is structurally under-calibrated (RMSz > 1.3 from 75-day phq backfill).
         _sig_floor_global = float(getattr(_cfg, "PUSH_HIGH_NO_MIN_SIGMA_F", 0.0))
         _sig_floor_by_st = getattr(_cfg, "PUSH_HIGH_NO_MIN_SIGMA_BY_STATION", {}) or {}
-        _sig_floor = float(_sig_floor_by_st.get(cand.station, _sig_floor_global))
+        # 2026-06-02: the per-station σ-floors (1.34-2.26) were calibrated for the
+        # MATCHER's variable σ as an over-confidence filter. The blend emits a FIXED
+        # calibrated σ (~1.17 HIGH) that is below all 7 per-station floors, so they
+        # silently bench HIGH BUY_NO at KPHX/KSAT/KOKC/KLAX/KSEA/KMIA/KMDW when the
+        # blend is live (faithful sim: ~+$110 left on the table). The blend's σ is
+        # its own calibration, not matcher over-confidence, so exempt blend rows from
+        # the per-station floors (keep the global PUSH_HIGH_NO_MIN_SIGMA_F=1.0 sanity
+        # floor, which 1.17 clears). mu_pre_blend is set iff the blend override fired.
+        # BLEND_EXEMPT_HIGH_SIGMA_FLOOR=False reverts. cf project_blend_edge_FOUND.
+        if (packet.get("mu_pre_blend") is not None
+                and getattr(_cfg, "BLEND_EXEMPT_HIGH_SIGMA_FLOOR", True)):
+            _sig_floor = _sig_floor_global
+        else:
+            _sig_floor = float(_sig_floor_by_st.get(cand.station, _sig_floor_global))
         if _sig_floor > 0:
             _sig = packet.get("sigma_chosen")
             if _sig is not None:
