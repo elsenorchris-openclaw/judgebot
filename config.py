@@ -415,7 +415,7 @@ GUARDRAILS = {
     # smaller LOW min-buy (PUSH_MIN_BUY_USD_LOW) into pure_nn_decide so the
     # integer-contract math doesn't collapse the way $5/$5 did on 2026-05-17
     # (min_buy == series_cap => no integer qty fits => all LOW buys skip).
-    "max_bet_low_series_usd": 3.0,  # 2026-05-26: bumped 1->3 (3x harvest) after live validation of the PUSH_LOW_POST_AT_MID probe. n=11 fills over 2 days at $1: +$3.72 realized (+$0.34/trade), 85% fill rate, +~11c/contract -- matches the +11.7c posted-at-mid backtest mechanism. Per-trade absolute risk small; LOW BUY_YES (previously the cross-loser) flipped to +$4.31/7 in the probe sample as expected (cheaper entry post-at-mid changes EV sign). KDEN BUY_NO B-bracket stays at $10 via PUSH_LOW_NO_BET_BY_STATION; all other LOW (incl. BUY_YES any station, T tails) lifts from $1 to $3.
+    "max_bet_low_series_usd": 10.0,  # 2026-05-26: bumped 1->3 (3x harvest) after live validation of the PUSH_LOW_POST_AT_MID probe. n=11 fills over 2 days at $1: +$3.72 realized (+$0.34/trade), 85% fill rate, +~11c/contract -- matches the +11.7c posted-at-mid backtest mechanism. Per-trade absolute risk small; LOW BUY_YES (previously the cross-loser) flipped to +$4.31/7 in the probe sample as expected (cheaper entry post-at-mid changes EV sign). KDEN BUY_NO B-bracket stays at $10 via PUSH_LOW_NO_BET_BY_STATION; all other LOW (incl. BUY_YES any station, T tails) lifts from $1 to $3.
     # Legacy single-cap field — kept for any reader unaware of side-specific
     # caps. Set to the higher of the two so generic checks don't false-positive.
     "max_bet_usd": 30.0,
@@ -535,27 +535,8 @@ PUSH_LOW_POST_AT_MID: bool = True
 PUSH_LOW_POST_TTL_S: int = 90
 PUSH_LOW_POST_POST_ONLY: bool = True
 PUSH_LOW_POST_ADVERSE_C: int = 3   # belt: per-cycle early-cancel if our side's mid fell >= this many c below post
-PUSH_HIGH_MAX_BET_DEFAULT: float = 5.0  # 2026-05-28 (Chris): raised 6->10 default after 5/27 +$105 combined day showed judge under-sized when matcher was right (judge +$18 on $57 cost = +32% ROI vs v1max +$88 on $135 = +65%; judge's biggest realized winners MIA YES/MSY/PHX were all sized at the de-sized/YES floor $2.76-$3.60). Only BOS/SEA stay $15 via PUSH_HIGH_MAX_BET_BY_STATION. NOTE cascade (edge-band sizes relative to this): 18-26pp up-tilt -> min($15, 10*2)=$15 (now CLIPS at the guardrail = same effective size as skill tier); fat >=26pp de-size -> 10*0.5=$5. (6->10 on 5/28; 3->6 on 5/27; 5->3 on 5/25; $5 uniform 5/23.)
-PUSH_HIGH_MAX_BET_BY_STATION = {
-    # 2026-05-25 (Chris): BOS + SEA sized to $15 -- the ONLY two stations whose
-    # matcher actually beats the market on Brier (last-month, h2pk 2-5: BOS
-    # +9-12%, SEA +8%, n~300 each, robust across aggregators). Concentrate
-    # capital where we have a real, market-relative edge. ALL OTHER stations
-    # stay $5 via PUSH_HIGH_MAX_BET_DEFAULT (unchanged). Requires the guardrail
-    # max_bet_high_series_usd=15 (backstop) or these get rejected. HIGH YES is
-    # unaffected -- it stays $3 via the PUSH_HIGH_YES_MAX_BET_USD down-size.
-    "KBOS": 20.0,
-    # 2026-05-28 (Chris): KSEA $20 carve-out REMOVED -> SEA now falls to the $10
-    # PUSH_HIGH_MAX_BET_DEFAULT. The BOS/SEA up-size was justified by a Brier
-    # claim, but realized SETTLED FILLS contradict it for SEA: KSEA -$38.92 /
-    # 28.6%WR / ROI -54% across all fills (-$10.76 even restricted to post-50c-
-    # floor HIGH). Sizing SEA UP is contradicted by the money. BOS kept (only
-    # n=2 post-floor, uninformative -> no evidence against it; revisit later).
-    # 2026-05-25 (Chris): SFO un-benched and left on the $3 default (no explicit
-    # entry). The bench wasn't OOS-robust -- SFO sign-FLIPS across the early/late
-    # split (+8.9c early, -23.9c late; cross-station PnL corr ~0.06) -- but it's
-    # not a +EV edge either, so it stays at the base $3 size, not the $15 skill tier.
-}
+PUSH_HIGH_MAX_BET_DEFAULT: float = 10.0  # 2026-05-28 (Chris): raised 6->10 default after 5/27 +$105 combined day showed judge under-sized when matcher was right (judge +$18 on $57 cost = +32% ROI vs v1max +$88 on $135 = +65%; judge's biggest realized winners MIA YES/MSY/PHX were all sized at the de-sized/YES floor $2.76-$3.60). Only BOS/SEA stay $15 via PUSH_HIGH_MAX_BET_BY_STATION. NOTE cascade (edge-band sizes relative to this): 18-26pp up-tilt -> min($15, 10*2)=$15 (now CLIPS at the guardrail = same effective size as skill tier); fat >=26pp de-size -> 10*0.5=$5. (6->10 on 5/28; 3->6 on 5/27; 5->3 on 5/25; $5 uniform 5/23.)
+PUSH_HIGH_MAX_BET_BY_STATION = {}  # 2026-06-02: cleared -> uniform $10 (blend supersedes matcher-Brier per-station skill tiers; "both books at $10")
 PUSH_HIGH_NO_BET_BY_STATION = {}  # 2026-05-22 (Chris): removed the $30 MIA-NO carve-out — uniform $15 max for all HIGH now (PUSH_HIGH_MAX_BET_DEFAULT). NO-resize code in nn_shadow_worker stays but is dormant while empty; re-add {station: usd} to size a NO cell up.
 
 # 2026-05-26 (Chris): EDGE-BAND sizing tilt — size up the band where the model's edge is
@@ -584,7 +565,7 @@ PUSH_HIGH_EDGE_TILT_BAND_LO_PP: float = 18.0  # size up a HIGH BUY_NO when its e
 PUSH_HIGH_EDGE_TILT_BAND_HI_PP: float = 26.0  # [LO, HI) pp — the reliable-edge band
 PUSH_HIGH_EDGE_TILT_MULT: float = 1.0         # 2026-05-30 (Chris): NEUTRALIZED 2.0->1.0. The x2 up-tilt on [18,26)pp BUY_NO rested on a Mar15-May20 SHADOW-log harness (+8.7c/bet, priced at no_ask_c) = same EVAL_PASS/shadow-price artifact disavowed for DESIZE_PP. On REAL NN-era fills [18,26) is -3.3c/ct (56%WR n=27), NOT a +EV band, so 2x-sizing it = unjustified tail risk (the AUS -$20 / TPHX -$19.50 busts). Base size only now; risk-reduction not alpha. Keep DESIZE x0.5. Rollback -> 2.0. cf 5/30 deep-dive.
 PUSH_HIGH_EDGE_TILT_DESIZE_PP: float = 26.0   # 2026-05-28: REVERTED 35->26. My 26->35 was EVAL_PASS-based (flawed, same artifact as the price-floor); on REAL fills the .26-.35 band is +EV only at >=50c (n=10, below ship bar). Back to prior validated value.
-PUSH_HIGH_EDGE_TILT_DESIZE_MULT: float = 0.5  # de-size multiplier on the station base cap (skill stations exempt)
+PUSH_HIGH_EDGE_TILT_DESIZE_MULT: float = 1.0  # de-size multiplier on the station base cap (skill stations exempt)
 
 # 2026-05-24 (Chris): per-station LOW BUY_NO size-up. Deep-dive found pooled LOW
 # loses because the matcher's sigma is ~2.75x too small (RMSz 2.69) -> fake NO
