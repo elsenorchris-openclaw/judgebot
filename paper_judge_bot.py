@@ -1652,12 +1652,20 @@ def prescreen(packet: dict) -> Optional[str]:
         return "no recent forecast in shared cache"
 
     # NOTE: previous wethr_highest_probable_f vs rm sanity filter rolled back
-    # 2026-05-15 — semantic misread on my part. `highest_probable_f` is wethr's
-    # *forward-looking* probable range (next ~1h window), not a daily-max
-    # prediction. Comparing forward-window probable to today's running max
-    # over-fires constantly post-peak (rm captured the past high, wethr_proj
-    # tracks current temp + small window). The real catches were 6°F+ outliers
-    # but at 1.5°F threshold the filter would have choked legitimate trades.
+    # 2026-05-15. CORRECTED 2026-06-02 (verified vs wethr API docs + raw response):
+    # `highest_probable_f`/`lowest_probable_f` are the ROUNDING-UNCERTAINTY RANGE
+    # of the CURRENT observation's temperature — when the METAR is integer-precision,
+    # the [lowest, highest] interval that could have rounded to the reported temp
+    # (e.g. 26°C->79°F => [78,79]); when a decimal T-group is present, both equal the
+    # exact temp (width 0). Empirically the width is ONLY ever 0°F (~16%) or 1°F (~84%)
+    # across all stations — a ±0.5°F precision band, NOT a forecast and NOT the day's
+    # max (wethr exposes `wethr_low`/`wethr_high`/`cli_*` for daily extremes). The prior
+    # comment mislabeled it "forward-looking ~1h range" — wrong. The rollback still
+    # stands but for the right reason: this band tracks the CURRENT reading ±0.5°F, so
+    # post-peak it sits ~current-temp (well below rm), making a vs-rm comparison
+    # meaningless. (It's a current-obs precision band, useful only for near-peak/locked
+    # boundary calls — see project_blend_edge_FOUND 2026-06-02; the deep-window blend
+    # trades 3-4h from the extreme where ±0.5°F current precision is immaterial.)
 
     # Numerical edge floor — require ≥ min_numerical_edge on one side.
     edge_info = _numerical_edge(packet, p.get("default_sigma_f", 2.5))
