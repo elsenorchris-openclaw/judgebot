@@ -261,8 +261,14 @@ def pure_nn_decide(
     }
 
     mu_method = packet.get("mu_method") or ""
-    if not mu_method.startswith("nn_match_"):
-        out["reason"] = f"mu_method={mu_method!r} not nn_match"
+    # 2026-06-02: accept the BLEND mu (the primary forecast since the blend
+    # shipped) in addition to the nn_match matcher mu (the fail-safe fallback
+    # used only when blend_mu returns None). This gate previously accepted
+    # nn_match ONLY, which silently SKIPped every blend-mu row -> the validated
+    # blend edge never actually executed (the bot ran on matcher mu the whole
+    # time). pure_nn_decide below is mu-source-agnostic (it just needs mu/sigma).
+    if not (mu_method.startswith("nn_match_") or mu_method.startswith("blend_")):
+        out["reason"] = f"mu_method={mu_method!r} not nn_match/blend"
         return out
 
     mu = packet.get("mu_chosen")
