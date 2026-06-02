@@ -1,11 +1,21 @@
-"""nn_shadow_worker.py — event-driven pure-nn shadow harness.
+"""nn_shadow_worker.py — the LIVE, event-driven trading brain.
+
+NOTE (2026-06-02): despite the legacy "shadow" name, this module IS the live
+trader — it places real Kalshi orders. It is the primary decision engine for the
+BLEND weather bot; paper_judge_bot.py is reduced to maintenance + the shared
+execute_buy/execute_sell it calls into here. See README.md.
 
 Triggers on:
   - Kalshi WS BBO change (via kalshi_ws.register_bbo_callback)
-  - wethr cache file mtime change (5s poll thread)
+  - wethr cache push (Unix socket) + a 5s file-poll fallback
 
-For each event, builds a lightweight packet, runs nn_shadow + pure_nn_decide,
-and logs the decision to data/shadow_nn_strategy.jsonl. No orders are placed.
+Per event, `_evaluate_ticker` builds the data packet, computes the matcher mu
+(fallback) then OVERRIDES it with the BLEND mu/sigma (`_compute_blend_override`,
+the primary forecast), runs `nn_shadow_strategy.pure_nn_decide`, applies the
+`_try_auto_execute` gate stack + decision window, and on a pass PLACES THE ORDER
+(HIGH via paper_judge_bot.execute_buy; LOW via low_post_probe.place). Every eval
+is also logged to data/shadow_nn_strategy.jsonl. `_check_adverse_drift_exit` (run
+first in each eval) is the only sell path; otherwise positions hold to settlement.
 
 Design constraints:
   - All callbacks must be try/except-wrapped so a shadow bug never crashes

@@ -1,18 +1,22 @@
-"""paper_judge_bot — main daemon entrypoint.
+"""paper_judge_bot — main daemon + shared executor for the BLEND weather bot.
 
-Run as a long-lived process (systemd) or with --once for one cycle of each loop.
+NOTE (2026-06-02): This bot trades the supervised BLEND forecast (blend_forecast),
+NOT NN-matching (now a fail-safe fallback) and NOT an LLM judge (LLM_DISPATCH_MODE
+="off"). The real trading brain is the EVENT-DRIVEN push worker `nn_shadow_worker`
+(triggered off WS BBO + wethr-cache pushes), which calls back into this module's
+shared `execute_buy` / `execute_sell`. See README.md for the full architecture.
 
-High-level flow per cycle:
-  1. Reload runtime flags (kill switch, mode).
-  2. Refresh balance + open positions from Kalshi.
-  3. EXIT loop: for each open position, evaluate exit triggers; on trigger,
-     call judge_exit and execute per guardrails.
-  4. ENTRY loop: enumerate the candidate universe; for each, run pre-screen,
-     gather live obs, call judge_entry, execute per guardrails.
-  5. Post heartbeat + per-cycle stats.
+What this file actually does in production:
+  - `main()` starts background feeds (obs_refresh, wethr_rm, kalshi_ws) and the
+    push worker (`nn_shadow_worker.start`), then loops `one_cycle` every ~120s.
+  - `one_cycle` is MAINTENANCE only: reconcile positions vs Kalshi, sweep LOW
+    maker orders (low_post_probe), WS-subscribe the candidate universe (so the
+    worker gets BBO events), resolve settlements, emit an hourly summary.
+  - `execute_buy` / `execute_sell`: the shared order executors the worker invokes.
 
-Single-process; the entry and exit loops share state and run sequentially
-within a cycle. Cadence is governed by sleep at the bottom of the cycle.
+DEAD CODE (kept for history, never reached): `run_entry_loop`, `run_exit_loop`,
+`build_entry_packet`, `_process_topups`, and every `judgment.judge_entry/judge_exit`
+LLM call. The old "EXIT loop -> ENTRY loop -> judge_*" cycle no longer runs.
 """
 from __future__ import annotations
 
