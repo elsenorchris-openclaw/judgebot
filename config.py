@@ -1225,4 +1225,5 @@ BLEND_FORECAST_LOW_ENABLED: bool = True
 # untested for lows). Set ENABLED=False to revert to the per-station windows.
 BLEND_DEEP_WINDOW_ENABLED: bool = True
 BLEND_DEEP_WINDOW_HOURS: tuple = (4.0, 2.5)
+BLEND_DEEP_WINDOW_HOURS_LOW: tuple = (3.0, 1.5)  # LOW: edge peaks ~min-2h (NOT deeper, unlike HIGH); window [min-3h, min-1.5h]. Small/noisy sample (~5mo). Models retrained at climo-min-2h.
           # LOW validated (+7.22c); False for HIGH-only

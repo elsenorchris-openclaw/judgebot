@@ -992,11 +992,19 @@ def _in_decision_window(station: str, series: str, local_hour: float,
     # it); near/post-peak ~dead. When the blend is active, trade HIGH only in the
     # deep window, overriding the table windows. Backtest (climo-peak, fwd-chain,
     # $10 liquid): -3h +$3257/WR.59 vs -2h +$1980 vs -1h +$280/WR.37.
-    if (series == "HIGH" and getattr(_cfg, "BLEND_FORECAST_ENABLED", False)
+    if (getattr(_cfg, "BLEND_FORECAST_ENABLED", False)
             and getattr(_cfg, "BLEND_DEEP_WINDOW_ENABLED", True)):
-        _dwh = getattr(_cfg, "BLEND_DEEP_WINDOW_HOURS", (4.0, 2.5))
-        before, after = float(_dwh[0]), -float(_dwh[1])
-        _trim_dbg += f" blend_deep[peak-{_dwh[0]},peak-{_dwh[1]}]"
+        _dwh = None
+        if series == "HIGH":
+            # HIGH: deep window (edge 2-3x bigger 3-4h before peak).
+            _dwh = getattr(_cfg, "BLEND_DEEP_WINDOW_HOURS", (4.0, 2.5))
+        elif series == "LOW" and getattr(_cfg, "BLEND_FORECAST_LOW_ENABLED", False):
+            # LOW: edge peaks ~2h before min (deeper does NOT help, unlike HIGH);
+            # concentrate around the min-2h sweet spot, cut the weak near-min bets.
+            _dwh = getattr(_cfg, "BLEND_DEEP_WINDOW_HOURS_LOW", (3.0, 1.5))
+        if _dwh:
+            before, after = float(_dwh[0]), -float(_dwh[1])
+            _trim_dbg += f" blend_deep[{series} peak-{_dwh[0]},peak-{_dwh[1]}]"
     lo = peak - before
     hi = peak + after
     ok = (lo <= local_hour <= hi)
