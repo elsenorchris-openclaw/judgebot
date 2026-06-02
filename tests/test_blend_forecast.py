@@ -18,6 +18,10 @@ class TestBlend(unittest.TestCase):
         self.assertIsNotNone(r)
     def test_failsafe_missing_market(self):
         self.assertIsNone(blend_forecast.blend_mu("high",None,84.0,82.0,None,"conservative"))
+    def test_full_with_nwp_ok(self):
+        nwp={"gfs_seamless":93.5,"ecmwf_ifs025":89.4,"icon_seamless":90.3,"gem_global":87.3,"jma_seamless":86.4,"ukmo_seamless":89.9}
+        r=blend_forecast.blend_mu("high",90.0,89.0,86.0,nwp,"full")
+        self.assertIsNotNone(r); self.assertTrue(60<r[0]<110)
     def test_failsafe_full_needs_nwp(self):
         # full variant without nwp models -> None (fail-safe), not a crash
         self.assertIsNone(blend_forecast.blend_mu("high",85.0,84.0,82.0,None,"full"))

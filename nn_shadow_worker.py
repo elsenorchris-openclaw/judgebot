@@ -150,6 +150,64 @@ def _compute_market_mu(station, climate_day, prefix):
     _market_mu_cache[key] = (now, mu)
     return mu
 
+_OM_MODELS = ["gfs_seamless", "ecmwf_ifs025", "icon_seamless", "gem_global",
+              "ecmwf_aifs025", "jma_seamless", "ukmo_seamless"]
+_blend_nwp_cache: dict = {}
+
+def _om_key():
+    k = os.environ.get("OPEN_METEO_API_KEY")
+    if k:
+        return k
+    for p in ("/home/ubuntu/paper_judge_bot/.env", "/home/ubuntu/.env"):
+        try:
+            for ln in open(p):
+                if ln.startswith("OPEN_METEO_API_KEY"):
+                    return ln.split("=", 1)[1].strip().strip('"').strip("'")
+        except Exception:
+            pass
+    return None
+
+def _compute_blend_nwp(station, climate_day, side):
+    """Live OpenMeteo 7-model forecast (max/min) for the climate_day. Cached 1h.
+    Returns {model: fc} or None (fail-safe -> caller drops to conservative blend)."""
+    key = (station, climate_day, side)
+    now = time.time()
+    c = _blend_nwp_cache.get(key)
+    if c and (now - c[0]) < 3600:
+        return c[1]
+    out = None
+    try:
+        import urllib.request, urllib.parse
+        import station_meta as _sm
+        meta = _sm.STATION_META.get(station)
+        apikey = _om_key()
+        if meta and apikey:
+            var = "temperature_2m_max" if side == "high" else "temperature_2m_min"
+            q = urllib.parse.urlencode({
+                "latitude": meta["lat"], "longitude": meta["lon"],
+                "past_days": 1, "forecast_days": 2, "daily": var,
+                "models": ",".join(_OM_MODELS), "temperature_unit": "fahrenheit",
+                "timezone": "auto", "apikey": apikey})
+            url = "https://customer-api.open-meteo.com/v1/forecast?" + q
+            with urllib.request.urlopen(url, timeout=8) as r:
+                d = json.load(r)
+            dd = d.get("daily", {}) or {}
+            dates = dd.get("time", []) or []
+            if climate_day in dates:
+                i = dates.index(climate_day)
+                mm = {}
+                for mdl in _OM_MODELS:
+                    vals = dd.get(var + "_" + mdl, [])
+                    if i < len(vals) and vals[i] is not None:
+                        mm[mdl] = float(vals[i])
+                if len(mm) >= 5:
+                    out = mm
+    except Exception:
+        out = None
+    _blend_nwp_cache[key] = (now, out)
+    return out
+
+
 _blend_log_ts = [0.0]
 def _compute_blend_override(cand, pkt, nn_res):
     """Return (mu, sigma) from the blend, or None to keep the matcher mu."""
@@ -171,7 +229,13 @@ def _compute_blend_override(cand, pkt, nn_res):
             curt = pkt.get("cur_tmpf")
         if rm is None or curt is None:
             return None
-        r = blend_forecast.blend_mu(side, float(mkt), float(rm), float(curt), None, variant)
+        nwp = None
+        if variant == "full":
+            nwp = _compute_blend_nwp(cand.station, cand.climate_day, side)
+        r = blend_forecast.blend_mu(side, float(mkt), float(rm), float(curt), nwp, variant)
+        if r is None and variant == "full":
+            # graceful degradation: OpenMeteo fetch failed -> conservative blend
+            r = blend_forecast.blend_mu(side, float(mkt), float(rm), float(curt), None, "conservative")
         if r is not None and (time.time() - _blend_log_ts[0]) > 60:
             _blend_log_ts[0] = time.time()
             try:
