@@ -386,6 +386,33 @@ def cancel_order(order_id: str) -> None:
         log.warning("cancel %s failed: %s", order_id, e)
 
 
+def get_order(order_id: str) -> Optional[dict]:
+    """Fetch a single order's AUTHORITATIVE state from Kalshi (status +
+    fill_count_fp + remaining_count). Returns None on query failure (e.g. a 404
+    for an order Kalshi has already purged). The taker-fallback uses this to
+    CONFIRM a maker is dead (status in canceled/executed, remaining 0) and to read
+    how much filled BEFORE crossing -- the core double-buy guard. Never raises."""
+    if config.DRY_RUN:
+        return {"order_id": order_id, "status": "canceled",
+                "fill_count_fp": "0", "remaining_count": 0}
+    try:
+        d = get(f"/trade-api/v2/portfolio/orders/{order_id}")
+        return (d or {}).get("order") or None
+    except Exception as e:
+        log.warning("get_order %s failed: %s", order_id, e)
+        return None
+
+
+def order_filled_count(order: dict) -> int:
+    """Parse the filled-contract count from an order dict (Kalshi fill_count_fp)."""
+    if not order:
+        return 0
+    try:
+        return int(float(order.get("fill_count_fp") or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
 def wait_for_fill(order_id: str, expected_count: int, timeout_sec: float = 5.0
                   ) -> tuple[str, int]:
     """Poll /portfolio/orders/{id} until fill_count_fp >= expected_count or timeout.

@@ -535,6 +535,19 @@ PUSH_LOW_POST_AT_MID: bool = True
 PUSH_LOW_POST_TTL_S: int = 90
 PUSH_LOW_POST_POST_ONLY: bool = True
 PUSH_LOW_POST_ADVERSE_C: int = 3   # belt: per-cycle early-cancel if our side's mid fell >= this many c below post
+# ── Unified maker-first + TAKER-FALLBACK (2026-06-03, Chris) ──────────────────
+# The maker (low_post) posts at mid and rests; if it is STILL unfilled as the
+# decision window is about to close, cross as a taker IF the edge still clears the
+# cost of crossing. Solves "the maker never fills so we get no position." The cross
+# is double-buy-safe: cancel -> get_order CONFIRM dead+zero-fill -> fresh wallet
+# check -> only then place the taker (see low_post_probe._taker_fallback). Default
+# OFF so deploying the code is inert; flip True (LOW first) after the live test.
+TAKER_FALLBACK_ENABLED: bool = False
+TAKER_FALLBACK_MIN_EDGE_PP: float = 8.0   # cross only if live edge >= this (must clear ~1.75c fee + spread)
+TAKER_FALLBACK_MAX_CROSS_C: int = 90      # never cross above this ask (no expensive favorites)
+TAKER_FALLBACK_LEAD_H: float = 0.2        # fire the cross this many hours BEFORE window-close (while still in-window)
+TAKER_FALLBACK_MAX_REST_S: int = 600      # deadline fallback when local-clock h_to_event is unavailable
+TAKER_CROSS_EXPIRY_S: int = 5             # native expiry on the cross order so any unmarketable remainder auto-cancels
 PUSH_HIGH_MAX_BET_DEFAULT: float = 5.0  # 2026-06-02 (Chris): 1->5. HIGH bets to $5 after the $1 live-validation start. NOTE this also 5x's the loosened $1-experiment trades (cheap-NO 25-50c, wide spread 15-25c, favorites 80-90c, edge 2-18pp) -> their slippage/RULE#2 risk is now $5/trade; watch the Discord feed, re-tighten the experimental gates if those buckets bleed. LOW stays $1. min_buy_usd=0.40 (no collapse at $5). Rollback ->1.  # (prior: 10->1 START-SMALL 6/2; 6->10 5/28)
 PUSH_HIGH_MAX_BET_BY_STATION = {}  # 2026-06-02: cleared -> uniform $10 (blend supersedes matcher-Brier per-station skill tiers; "both books at $10")
 PUSH_HIGH_NO_BET_BY_STATION = {}  # 2026-05-22 (Chris): removed the $30 MIA-NO carve-out — uniform $15 max for all HIGH now (PUSH_HIGH_MAX_BET_DEFAULT). NO-resize code in nn_shadow_worker stays but is dormant while empty; re-add {station: usd} to size a NO cell up.
