@@ -224,6 +224,83 @@ def _compute_blend_nwp(station, climate_day, side):
     return out
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# LST clock helpers (2026-06-03, Chris): Kalshi climate-days + the empirical
+# peak/min tables are LST (no DST). local_clock_context()/OpenMeteo are DAYLIGHT
+# time. These convert between them so the WHOLE clock lives in one LST frame.
+# ─────────────────────────────────────────────────────────────────────────────
+def _dst_offset_h(station: str) -> float:
+    """Current daylight-saving offset in HOURS for the station: ~1.0 while DST is in
+    effect, 0.0 in standard time (and 0.0 year-round for no-DST zones like Arizona).
+    = cur_utcoffset(now) - standard_utcoffset(January). Used to shift solar/OpenMeteo
+    DAYLIGHT-time hours to LST. Never raises (returns 0.0 on any failure)."""
+    try:
+        import climate_normals as _cn
+        tz = _cn._STATION_TZ.get(station)
+        if not tz:
+            return 0.0
+        from zoneinfo import ZoneInfo
+        z = ZoneInfo(tz)
+        now = _dtm.datetime.now(_dtm.timezone.utc)
+        cur = now.astimezone(z).utcoffset()
+        jan = _dtm.datetime(now.year, 1, 15, 12, tzinfo=_dtm.timezone.utc).astimezone(z).utcoffset()
+        if cur is None or jan is None:
+            return 0.0
+        return round((cur - jan).total_seconds() / 3600.0, 3)
+    except Exception:
+        return 0.0
+
+
+def _lst_signed_h(target, cur):
+    """Signed hours from cur to target local hour, wrapped to (-12, 12] — matches
+    solar_calc._signed_h_to. None if either input is None."""
+    if target is None or cur is None:
+        return None
+    d = float(target) - float(cur)
+    if d <= -12:
+        d += 24.0
+    if d > 12:
+        d -= 24.0
+    return round(d, 2)
+
+
+def _apply_lst_clock(ctx: dict, station: str, climate_day: str) -> dict:
+    """Override the packet's local-clock fields into ONE consistent LST frame.
+
+    Kalshi climate-days + the empirical peak/min tables (_lookup_peak_hour, observed
+    5yr-P50 — the most accurate climatology we have) are LST (no DST). The incoming
+    ctx (from climate_normals.local_clock_context) is solar+ZoneInfo = DAYLIGHT time
+    AND a cruder sunrise+lag model. Mixing them put the window gate ~1h off in summer
+    (rejected 194 in-window LOW buys on 6/3). Here local_hour + peak/min + h_to_* +
+    past_* are all re-derived from the empirical LST table; the solar values are
+    dropped (kept only as an LST-shifted FALLBACK for a station absent from the table,
+    so none loses its clock). Inert when LST_CLOCK_ENABLED is False."""
+    if not getattr(_cfg, "LST_CLOCK_ENABLED", True):
+        return ctx
+    try:
+        dst = _dst_offset_h(station)
+        lh = ctx.get("local_hour")
+        lh_lst = ((float(lh) - dst) % 24.0) if lh is not None else None
+        pk = _lookup_peak_hour(station, "HIGH", climate_day)
+        if pk is None and ctx.get("peak_hour_local") is not None:
+            pk = (float(ctx["peak_hour_local"]) - dst) % 24.0
+        mn = _lookup_peak_hour(station, "LOW", climate_day)
+        if mn is None and ctx.get("min_hour_local") is not None:
+            mn = (float(ctx["min_hour_local"]) - dst) % 24.0
+        ctx["local_hour"] = lh_lst
+        ctx["peak_hour_local"] = pk
+        ctx["min_hour_local"] = mn
+        ctx["h_to_peak"] = _lst_signed_h(pk, lh_lst)
+        ctx["h_to_min"] = _lst_signed_h(mn, lh_lst)
+        ctx["past_peak_today"] = (ctx["h_to_peak"] is not None and ctx["h_to_peak"] < 0)
+        ctx["past_min_today"] = (ctx["h_to_min"] is not None and ctx["h_to_min"] < 0)
+        ctx["tz_convention"] = "LST"
+        ctx["dst_offset_h"] = dst
+    except Exception:
+        log.exception("LST clock override failed for %s", station)
+    return ctx
+
+
 def _compute_fc_min_hour(station, climate_day):
     """Live hourly OpenMeteo forecast -> LOCAL hour of the day's forecast MIN.
     Cached 1h. Returns None on any failure (caller skips the lock = current behavior)."""
@@ -319,8 +396,13 @@ def _compute_blend_override(cand, pkt, nn_res):
         # pre-dawn untouched). FAIL-SAFE: no hourly/clock -> no lock = current behavior.
         if (r is not None and side == "low"
                 and getattr(_cfg, "BLEND_LOW_FORECAST_LOCK_ENABLED", True)):
-            _lh = (pkt.get("local_clock") or {}).get("local_hour")
+            _lh = (pkt.get("local_clock") or {}).get("local_hour")   # LST (post-override)
             _fmh = _compute_fc_min_hour(cand.station, cand.climate_day)
+            # _compute_fc_min_hour uses OpenMeteo timezone:auto = DAYLIGHT time; the
+            # clock is now LST, so shift the forecast min-hour to LST to compare
+            # like-for-like (else the lock would be ~1h off in summer).
+            if _fmh is not None and getattr(_cfg, "LST_CLOCK_ENABLED", True):
+                _fmh = (float(_fmh) - _dst_offset_h(cand.station)) % 24.0
             _marg = float(getattr(_cfg, "BLEND_LOW_LOCK_MARGIN_H", 1.5))
             if _lh is not None and _fmh is not None and _fmh < float(_lh) - _marg:
                 r = (round(float(rm), 2), r[1])
@@ -1891,6 +1973,9 @@ def _build_shadow_packet(cand: market_universe.Candidate) -> Optional[dict]:
         ctx = climate_normals.local_clock_context(cand.station, time.time()) or {}
     except Exception:
         ctx = {}
+
+    # 2026-06-03 (Chris): SINGLE min/peak-hour source, in LST (see _apply_lst_clock).
+    ctx = _apply_lst_clock(ctx, cand.station, cand.climate_day)
 
     # rm choice — high series uses high_f, low series uses low_f
     is_high = cand.series_prefix == "KXHIGH"

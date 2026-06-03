@@ -604,6 +604,15 @@ PUSH_LOW_NO_BET_BY_STATION = {}  # 2026-06-02 (Chris): cleared the KDEN $10 carv
 # table is the sole window source; False = push window system OFF (no trades,
 # no alert). Table generated from /home/ubuntu/data/phq_combined.csv backtest.
 USE_PUSH_WINDOW_OVERRIDES: bool = True
+# 2026-06-03 (Chris): SINGLE min/peak-hour source, in LST. The window gate uses the
+# empirical LST peak/min tables (_lookup_peak_hour, observed P50 — the most accurate
+# climatology we have); the eval clock was solar+ZoneInfo = DAYLIGHT time, so in
+# summer the two were ~1h apart and the gate rejected 194 in-window LOW buys/day
+# (and shifted HIGH ~1h). With this True, nn_shadow_worker overrides the packet clock
+# (local_hour + peak/min + h_to_* + past_*) to the empirical LST table in one LST
+# frame, and LST-shifts the LOW forecast-lock's OpenMeteo min-hour. False = revert to
+# the (DST-buggy) solar clock.
+LST_CLOCK_ENABLED: bool = True
 
 # Fractional peak source for nn_shadow_worker._lookup_peak_hour.
 # When True, the decision-window check uses 5-year 10-day-rolling P50 of
