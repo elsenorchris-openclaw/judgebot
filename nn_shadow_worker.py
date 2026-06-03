@@ -281,10 +281,10 @@ def _apply_lst_clock(ctx: dict, station: str, climate_day: str) -> dict:
         dst = _dst_offset_h(station)
         lh = ctx.get("local_hour")
         lh_lst = ((float(lh) - dst) % 24.0) if lh is not None else None
-        pk = _lookup_peak_hour(station, "HIGH", climate_day)
+        pk = _window_peak_hour(station, "HIGH", climate_day)
         if pk is None and ctx.get("peak_hour_local") is not None:
             pk = (float(ctx["peak_hour_local"]) - dst) % 24.0
-        mn = _lookup_peak_hour(station, "LOW", climate_day)
+        mn = _window_peak_hour(station, "LOW", climate_day)
         if mn is None and ctx.get("min_hour_local") is not None:
             mn = (float(ctx["min_hour_local"]) - dst) % 24.0
         ctx["local_hour"] = lh_lst
@@ -1043,6 +1043,102 @@ def _regime_adjusted_mae(cell_mae, cand, pkt, nn_res):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Forecast-anchored window peak/min hour (2026-06-03, Chris). The empirical LST
+# table is the most accurate CLIMATOLOGY; the live NWP forecast is more accurate
+# for ANOMALOUS days (a front moves the peak/min hours). We anchor the window to the
+# forecast hour ONLY when it is trustworthy — searched in the physical band (so a
+# low-diurnal-range station's calendar-day argmin doesn't land in the EVENING) and
+# SHARP (a clear peak/min, not a flat plateau where the argmax is just noise). Else
+# we fall back to the empirical LST climatology. Both the gate and the packet clock
+# call _window_peak_hour so they can never diverge.
+# ─────────────────────────────────────────────────────────────────────────────
+_FC_PEAK_BAND_LST = (10.0, 19.0)   # afternoon — daily HIGH search band (LST)
+_FC_MIN_BAND_LST = (1.0, 9.0)      # around dawn — daily LOW search band (LST)
+_fc_curve_cache: dict = {}
+
+def _fc_curve(station, climate_day):
+    """Live OpenMeteo hourly temps for the climate_day as [(local_daylight_hour, tempF)].
+    Cached 1h. Returns [] on any failure. ONE fetch/station/hour serves both extremes."""
+    key = (station, climate_day)
+    now = time.time()
+    c = _fc_curve_cache.get(key)
+    if c and (now - c[0]) < 3600:
+        return c[1]
+    pts = []
+    try:
+        import urllib.request, urllib.parse
+        import station_meta as _sm
+        meta = _sm.STATION_META.get(station)
+        apikey = _om_key()
+        if meta and apikey:
+            q = urllib.parse.urlencode({
+                "latitude": meta["lat"], "longitude": meta["lon"],
+                "past_days": 1, "forecast_days": 2, "hourly": "temperature_2m",
+                "temperature_unit": "fahrenheit", "timezone": "auto", "apikey": apikey})
+            with urllib.request.urlopen(
+                    "https://customer-api.open-meteo.com/v1/forecast?" + q, timeout=8) as r:
+                d = json.load(r)
+            hh = d.get("hourly", {}) or {}
+            for t, tv in zip(hh.get("time", []) or [], hh.get("temperature_2m", []) or []):
+                if tv is None or not str(t).startswith(climate_day):
+                    continue
+                try:
+                    pts.append((int(t[11:13]) + int(t[14:16]) / 60.0, float(tv)))
+                except Exception:
+                    continue
+    except Exception:
+        pts = []
+    _fc_curve_cache[key] = (now, pts)
+    return pts
+
+def _fc_extreme_hour(station, climate_day, series):
+    """Forecast hour (LST) of the daily HIGH (argmax) / LOW (argmin), SEARCHED ONLY
+    in the physical band so a low-diurnal-range station's calendar-day argmin can't
+    land in the evening. Returns (hour_lst, is_sharp). is_sharp = few hours within
+    FORECAST_FLAT_TOL_F of the extreme (a clear peak/min, not a flat plateau where
+    the timing is just noise). (None, False) when unavailable / no in-band hours."""
+    pts = _fc_curve(station, climate_day)
+    if not pts:
+        return None, False
+    dst = _dst_offset_h(station)
+    band = _FC_PEAK_BAND_LST if series == "HIGH" else _FC_MIN_BAND_LST
+    inband = []
+    for h_local, tv in pts:
+        h_lst = (h_local - dst) % 24.0
+        if band[0] <= h_lst <= band[1]:
+            inband.append((h_lst, tv))
+    if not inband:
+        return None, False
+    ext = (max if series == "HIGH" else min)(inband, key=lambda x: x[1])
+    tol = float(getattr(_cfg, "FORECAST_FLAT_TOL_F", 1.0))
+    near = sum(1 for _h, tv in inband if abs(tv - ext[1]) <= tol)
+    sharp = near <= int(getattr(_cfg, "FORECAST_FLAT_MAX_HOURS", 3))
+    # band-edge guard: an extreme sitting AT the search-band boundary usually means
+    # the true extreme is OUTSIDE the band (clipped) -> the timing is unreliable, so
+    # don't trust it (fall back to climatology). Margin in hours.
+    edge_m = float(getattr(_cfg, "FC_BAND_EDGE_MARGIN_H", 0.5))
+    if ext[0] <= band[0] + edge_m or ext[0] >= band[1] - edge_m:
+        sharp = False
+    return round(ext[0], 2), sharp
+
+def _window_peak_hour(station, series, climate_day):
+    """THE window peak (HIGH) / min (LOW) hour, in LST. Forecast-anchored: the live
+    NWP forecast hour when it is in-band AND sharp (a real, clearly-timed extreme —
+    e.g. a front day); otherwise the empirical LST climatology (_lookup_peak_hour).
+    Used by BOTH the gate and the packet clock so they stay in lockstep."""
+    emp = _lookup_peak_hour(station, series, climate_day)
+    if not getattr(_cfg, "FORECAST_ANCHOR_ENABLED", True):
+        return emp
+    try:
+        fc_lst, sharp = _fc_extreme_hour(station, climate_day, series)
+        if fc_lst is None or not sharp:
+            return emp
+        return fc_lst
+    except Exception:
+        return emp
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Per-station decision-window check (auto-execute gate)
 # ─────────────────────────────────────────────────────────────────────────────
 def _in_decision_window(station: str, series: str, local_hour: float,
@@ -1059,7 +1155,7 @@ def _in_decision_window(station: str, series: str, local_hour: float,
     """
     if local_hour is None:
         return False, "no_local_hour"
-    peak = _lookup_peak_hour(station, series, climate_day)
+    peak = _window_peak_hour(station, series, climate_day)
     if peak is None:
         # (a) NO peak in fractional OR pace_curves -> not trading this cell.
         # Loud alert so a true missing-peak is never a silent skip.

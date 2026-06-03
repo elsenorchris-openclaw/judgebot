@@ -613,6 +613,21 @@ USE_PUSH_WINDOW_OVERRIDES: bool = True
 # frame, and LST-shifts the LOW forecast-lock's OpenMeteo min-hour. False = revert to
 # the (DST-buggy) solar clock.
 LST_CLOCK_ENABLED: bool = True
+# 2026-06-03 (Chris): FORECAST-ANCHOR the window peak/min HOUR. The empirical LST
+# table is the best CLIMATOLOGY, but the live NWP forecast is more accurate for the
+# specific day (a front moves the peak/min hours). _window_peak_hour uses the forecast
+# hour when it is trustworthy and falls back to climatology otherwise. "Trustworthy" =
+# the daily extreme searched ONLY in the physical band (afternoon for HIGH / dawn for
+# LOW, so a low-diurnal-range station's calendar-day argmin doesn't land in the evening
+# -- verified: KMIA/KLAX/KSEA forecast-min argmin was 21:00-23:00), AND SHARP (<=
+# FORECAST_FLAT_MAX_HOURS hours within FORECAST_FLAT_TOL_F of the extreme -- a clear
+# peak/min, not a flat plateau where the argmax is just noise). Catches real front days
+# AND rejects noise (a distance-from-climo bound can't tell them apart). False = pure
+# empirical-LST climatology (the shipped LST clock).
+FORECAST_ANCHOR_ENABLED: bool = True
+FORECAST_FLAT_TOL_F: float = 1.0       # hours within this many F of the extreme count as "near"
+FORECAST_FLAT_MAX_HOURS: int = 3       # <= this many near-hours = sharp (trust the forecast timing)
+FC_BAND_EDGE_MARGIN_H: float = 0.5     # distrust a forecast extreme within this of the search-band edge (likely clipped)
 
 # Fractional peak source for nn_shadow_worker._lookup_peak_hour.
 # When True, the decision-window check uses 5-year 10-day-rolling P50 of
