@@ -542,7 +542,7 @@ PUSH_LOW_POST_ADVERSE_C: int = 3   # belt: per-cycle early-cancel if our side's 
 # is double-buy-safe: cancel -> get_order CONFIRM dead+zero-fill -> fresh wallet
 # check -> only then place the taker (see low_post_probe._taker_fallback). Default
 # OFF so deploying the code is inert; flip True (LOW first) after the live test.
-TAKER_FALLBACK_ENABLED: bool = False
+TAKER_FALLBACK_ENABLED: bool = True   # 2026-06-03: SHIPPED to LOW after the controlled $1 live test passed clean (cancel->confirm->cross exactly once; held-guard blocked a 2nd cross; no double-buy). LOW-only by construction (only low_post makers carry a fallback deadline). False to revert.
 TAKER_FALLBACK_MIN_EDGE_PP: float = 8.0   # cross only if live edge >= this (must clear ~1.75c fee + spread)
 TAKER_FALLBACK_MAX_CROSS_C: int = 90      # never cross above this ask (no expensive favorites)
 TAKER_FALLBACK_LEAD_H: float = 0.2        # fire the cross this many hours BEFORE window-close (while still in-window)
