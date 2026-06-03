@@ -119,5 +119,22 @@ class TestGateConsistency(unittest.TestCase):
         self.assertTrue(ok, dbg)
 
 
+class TestFmtLocalTime(unittest.TestCase):
+    """_fmt_local_time formats the local clock hour for records / the Discord card."""
+    def test_basic(self):
+        self.assertEqual(nsw._fmt_local_time(13.5), "13:30")
+        self.assertEqual(nsw._fmt_local_time(9.0), "09:00")
+        self.assertEqual(nsw._fmt_local_time(13.52), "13:31")
+
+    def test_none(self):
+        self.assertIsNone(nsw._fmt_local_time(None))
+
+    def test_minute_carry(self):
+        self.assertEqual(nsw._fmt_local_time(13.999), "14:00")
+
+    def test_wrap_past_midnight(self):
+        self.assertEqual(nsw._fmt_local_time(25.5), "01:30")
+
+
 if __name__ == "__main__":
     unittest.main()

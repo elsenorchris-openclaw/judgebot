@@ -39,6 +39,18 @@ class TestPureNnDecide(unittest.TestCase):
         self.assertEqual(d["decision"], "SKIP")
         self.assertIn("not nn_match", d["reason"])
 
+    def test_blend_mu_accepted(self):
+        """Dead-gate fix (be6402a): a blend_ mu_method must be ACCEPTED, not SKIPped.
+        Guards against regressing to the nn_match-only gate that silently killed every
+        blend row (the validated blend edge never traded until 2026-06-02)."""
+        d = nss.pure_nn_decide(_pkt(mu_method="blend_KXHIGH"))
+        self.assertEqual(d["decision"], "BUY_NO")        # same as the canonical nn_match case
+        self.assertNotIn("not nn_match", d["reason"])    # NOT rejected on mu_method
+
+    def test_blend_low_mu_accepted(self):
+        d = nss.pure_nn_decide(_pkt(mu_method="blend_KXLOW"))
+        self.assertNotIn("not nn_match", d["reason"])
+
     def test_skip_when_edge_below_floor(self):
         # μ in middle of YES window → low edge on both sides
         d = nss.pure_nn_decide(_pkt(mu_chosen=83.5, sigma_chosen=2.0,
