@@ -244,5 +244,42 @@ class TestMatcherPaper(_Base):
         rec.assert_not_called()
 
 
+class TestHighMakerRouting(_Base):
+    """2026-06-03: with PUSH_HIGH_POST_AT_MID, a HIGH blend buy that clears every gate
+    is routed to low_post_probe.place (maker-first) instead of execute_buy (taker).
+    Flag OFF -> HIGH still takes via execute_buy. sigma=2.5 clears the per-station floor;
+    mu=92 outside [88,89] keeps the tail-bet gate clear; tight 2c spread + 48/50 bbo."""
+    def _pkt(self):
+        return {"yes_ask_c": 50, "no_ask_c": 50, "yes_bid_c": 48, "no_bid_c": 48,
+                "seconds_to_close": 10_000, "mu_chosen": 92.0, "floor": 88.0, "cap": 89.0,
+                "sigma_chosen": 2.5, "mu_method": "blend_KXHIGH", "push_target_usd": 10.0,
+                "local_clock": {"h_to_peak": 3.0, "local_hour": 12.0}}
+
+    def test_high_routes_to_maker_when_flag_on(self):
+        import config as _cfg
+        import low_post_probe
+        cand = _cand("KXHIGHMIA-26MAY20-B88.5", "KMIA")
+        with mock.patch.object(_cfg, "BLEND_ONLY_EXECUTION", True), \
+             mock.patch.object(_cfg, "PUSH_HIGH_POST_AT_MID", True), \
+             mock.patch.object(low_post_probe, "has_resting", return_value=False), \
+             mock.patch.object(low_post_probe, "place",
+                               return_value=(True, "low_post no @49c")) as place:
+            ok, reason = self._run(cand, self._pkt(), _decision("BUY_NO"))
+        self.assertTrue(ok)
+        place.assert_called_once()           # routed to the maker engine
+
+    def test_high_takes_when_flag_off(self):
+        import config as _cfg
+        import low_post_probe
+        cand = _cand("KXHIGHMIA-26MAY20-B88.5", "KMIA")
+        with mock.patch.object(_cfg, "BLEND_ONLY_EXECUTION", True), \
+             mock.patch.object(_cfg, "PUSH_HIGH_POST_AT_MID", False), \
+             mock.patch.object(low_post_probe, "place") as place:
+            ok, reason = self._run(cand, self._pkt(), _decision("BUY_NO"))
+        self.assertTrue(ok)
+        self.assertIn("executed", reason)    # took via execute_buy (mocked in _run)
+        place.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

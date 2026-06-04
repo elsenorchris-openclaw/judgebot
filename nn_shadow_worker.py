@@ -1890,13 +1890,19 @@ def _try_auto_execute(cand, packet: dict, decision: dict,
         )
         import paper_judge_bot as _pjb
         # 2026-05-24: LOW posting probe. Post a maker limit at MID and rest it
-        # (async-adopted by low_post_probe.sweep) instead of crossing the wide
-        # LOW spread. Flag-gated, LOW-only; HIGH still crosses via execute_buy.
-        if (cand.series_prefix == "KXLOW"
-                and getattr(_cfg, "PUSH_LOW_POST_AT_MID", False)):
+        # (async-adopted by low_post_probe.sweep) instead of crossing the spread.
+        # 2026-06-03 (Chris): HIGH maker-first too (PUSH_HIGH_POST_AT_MID) -- the
+        # backtest says crossing the HIGH spread + taker fee costs ~2.8c/ct (+28% of
+        # the edge); posting at mid + the taker-fallback recovers it. Same engine, same
+        # double-buy-safe cross. Flag-gated per series; default = HIGH still takes.
+        _post_at_mid = ((cand.series_prefix == "KXLOW"
+                         and getattr(_cfg, "PUSH_LOW_POST_AT_MID", False))
+                        or (cand.series_prefix == "KXHIGH"
+                            and getattr(_cfg, "PUSH_HIGH_POST_AT_MID", False)))
+        if _post_at_mid:
             import low_post_probe
             if low_post_probe.has_resting(cand.ticker) or cand.ticker in _rt.positions:
-                return False, "low_post_already_active"
+                return False, "post_already_active"
             return low_post_probe.place(_rt, cand, packet, entry_dec,
                                         short_dir.lower(), decision)
         _pjb.execute_buy(_rt, cand, packet, entry_dec)

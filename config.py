@@ -526,6 +526,13 @@ MU_AGREEMENT_MAX_DIFF_F: float = 4.0  # 2026-05-26 (Chris): loosened 2.0->4.0. A
 # mid -- LOW problem is execution, not signal. Measures live fill-rate at mid.
 # LOW-only; HIGH + the cross path are untouched. Set False to revert to crossing.
 PUSH_LOW_POST_AT_MID: bool = True
+# 2026-06-03 (Chris): HIGH maker-first. Route HIGH through low_post_probe.place (post
+# at mid, rest, taker-fallback crosses near window-close) instead of crossing the ask.
+# Backtest @ window lead: TAKER (cross+fee) +10.2c/ct vs MAKER (mid, no fee) +13.0c/ct
+# = +2.8c/ct (+28%). Same double-buy-safe engine as LOW; HIGH sizing honored via
+# push_target_usd. Default OFF (HIGH still takes) until the controlled live fill-check
+# passes; then True. Revert = False.
+PUSH_HIGH_POST_AT_MID: bool = False
 # 2026-05-26: resting-order risk mgmt. A LOW maker bid only fills when the
 # market comes DOWN to it (adverse selection); the 120s loop is too slow to
 # cancel before a collapse picks us off, so cap exposure with a NATIVE Kalshi
