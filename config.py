@@ -532,7 +532,7 @@ PUSH_LOW_POST_AT_MID: bool = True
 # = +2.8c/ct (+28%). Same double-buy-safe engine as LOW; HIGH sizing honored via
 # push_target_usd. Default OFF (HIGH still takes) until the controlled live fill-check
 # passes; then True. Revert = False.
-PUSH_HIGH_POST_AT_MID: bool = True   # 2026-06-03: ENABLED after the controlled live fill-check on KXHIGHTLV-B105.5 (place posted a $10 maker 32ct@31c mid; taker-fallback retried on unconfirmed-cancel = double-buy guard, then crossed 5/32 partial @33c, adopted exactly 5; RUN2 held-guard blocked a 2nd cross = no double). Sizing+mid-post+cross all verified for HIGH; cross engine proven on LOW. Revert ->False.
+PUSH_HIGH_POST_AT_MID: bool = False  # 2026-06-03: REVERTED to taker. The live fill-check exposed the real constraint = HIGH BOOK DEPTH, not maker-vs-taker (LV-B105.5 had 5ct at the touch; my cross got 5/32; a maker can't conjure depth either). The +28% maker backtest priced 100% MID-fills, but in the thin low-activity deep window the maker mostly RESTS -> fallback crosses at the ask = taker price, no benefit; and the fallback adopts a PARTIAL mid-fill without crossing the remainder -> could undersize below taker. HIGH's fat edge (+13-16c/ct) absorbs the ~2.8c spread+fee; taker fills available depth immediately. Re-enable only after the partial-fill gap is fixed AND a live mid-fill-rate measurement justifies it. LOW keeps maker-first (thin edge -> spread/fee critical, dawn min-window is active).
 # 2026-05-26: resting-order risk mgmt. A LOW maker bid only fills when the
 # market comes DOWN to it (adverse selection); the 120s loop is too slow to
 # cancel before a collapse picks us off, so cap exposure with a NATIVE Kalshi
