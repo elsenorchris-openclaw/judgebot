@@ -532,7 +532,7 @@ PUSH_LOW_POST_AT_MID: bool = True
 # = +2.8c/ct (+28%). Same double-buy-safe engine as LOW; HIGH sizing honored via
 # push_target_usd. Default OFF (HIGH still takes) until the controlled live fill-check
 # passes; then True. Revert = False.
-PUSH_HIGH_POST_AT_MID: bool = False
+PUSH_HIGH_POST_AT_MID: bool = True   # 2026-06-03: ENABLED after the controlled live fill-check on KXHIGHTLV-B105.5 (place posted a $10 maker 32ct@31c mid; taker-fallback retried on unconfirmed-cancel = double-buy guard, then crossed 5/32 partial @33c, adopted exactly 5; RUN2 held-guard blocked a 2nd cross = no double). Sizing+mid-post+cross all verified for HIGH; cross engine proven on LOW. Revert ->False.
 # 2026-05-26: resting-order risk mgmt. A LOW maker bid only fills when the
 # market comes DOWN to it (adverse selection); the 120s loop is too slow to
 # cancel before a collapse picks us off, so cap exposure with a NATIVE Kalshi
