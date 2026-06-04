@@ -251,6 +251,23 @@ def _dst_offset_h(station: str) -> float:
         return 0.0
 
 
+def _station_local_date(station: str) -> Optional[str]:
+    """Station's CURRENT wall-clock (LDT) calendar date as 'YYYY-MM-DD' — the
+    convention Kalshi uses for a bracket's climate_day. None on any tz miss/failure
+    (callers fail OPEN). Used by the window gate to refuse a bracket whose extreme
+    is on a different calendar date than now (e.g. a next-day bracket open during
+    today's deep window)."""
+    try:
+        import climate_normals as _cn
+        tz = _cn._STATION_TZ.get(station)
+        if not tz:
+            return None
+        from zoneinfo import ZoneInfo
+        return _dtm.datetime.now(ZoneInfo(tz)).strftime("%Y-%m-%d")
+    except Exception:
+        return None
+
+
 def _lst_signed_h(target, cur):
     """Signed hours from cur to target local hour, wrapped to (-12, 12] — matches
     solar_calc._signed_h_to. None if either input is None."""
@@ -1155,6 +1172,17 @@ def _in_decision_window(station: str, series: str, local_hour: float,
     """
     if local_hour is None:
         return False, "no_local_hour"
+    # 2026-06-04 (Chris): only trade a bracket on the calendar date its extreme
+    # occurs. The window test below is purely time-of-day (local_hour vs peak), so a
+    # FUTURE-day bracket open during today's deep window would otherwise PASS (e.g. a
+    # Jun-4 HIGH evaluated at Jun-3 noon -> h_to_peak lands in-window -> bought ~27h
+    # early). Guard on the station's WALL-CLOCK date (= Kalshi's climate_day). Fail
+    # OPEN on any tz miss so a real same-day trade is never blocked.
+    import config as _cfg
+    if getattr(_cfg, "CLIMATE_DAY_GUARD_ENABLED", True):
+        _ld = _station_local_date(station)
+        if _ld is not None and climate_day != _ld:
+            return False, f"not_today_climate_day {climate_day}!=local:{_ld}"
     peak = _window_peak_hour(station, series, climate_day)
     if peak is None:
         # (a) NO peak in fractional OR pace_curves -> not trading this cell.

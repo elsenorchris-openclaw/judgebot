@@ -624,6 +624,13 @@ USE_PUSH_WINDOW_OVERRIDES: bool = True
 # frame, and LST-shifts the LOW forecast-lock's OpenMeteo min-hour. False = revert to
 # the (DST-buggy) solar clock.
 LST_CLOCK_ENABLED: bool = True
+# 2026-06-04 (Chris): refuse to trade a bracket whose climate_day != the station's
+# current WALL-CLOCK date. The window gate tests time-of-day only, so without this a
+# next-day bracket open during today's deep window would be bought ~a day early (a
+# Jun-4 HIGH at Jun-3 noon). Fail-OPEN on tz miss (never blocks a real same-day trade).
+# Disabled in the test suite (conftest) so fixed-date gate tests still run; the
+# dedicated test_climate_day_guard re-enables it. Rollback -> False.
+CLIMATE_DAY_GUARD_ENABLED: bool = True
 # 2026-06-03 (Chris): FORECAST-ANCHOR the window peak/min HOUR. The empirical LST
 # table is the best CLIMATOLOGY, but the live NWP forecast is more accurate for the
 # specific day (a front moves the peak/min hours). _window_peak_hour uses the forecast

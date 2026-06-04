@@ -37,3 +37,19 @@ def _disable_forecast_anchor_for_suite():
         return
     with mock.patch.object(config, "FORECAST_ANCHOR_ENABLED", False):
         yield
+
+
+@pytest.fixture(autouse=True)
+def _disable_climate_day_guard_for_suite():
+    """2026-06-04: _in_decision_window refuses brackets whose climate_day != the
+    station's current wall-clock date. The window/clock gate tests pass FIXED past
+    climate_days (e.g. 2026-06-03), which this guard would reject as "not today".
+    Default it OFF for the suite so those tests exercise their target gate; the
+    dedicated test_climate_day_guard re-enables it and mocks _station_local_date."""
+    try:
+        import config
+    except Exception:
+        yield
+        return
+    with mock.patch.object(config, "CLIMATE_DAY_GUARD_ENABLED", False):
+        yield
