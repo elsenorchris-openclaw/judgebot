@@ -130,6 +130,40 @@ def _cur_side_ask_c(ticker: str, side: str) -> Optional[int]:
     return ask_c if 0 < ask_c <= 100 else None
 
 
+def _fallback_deadline_and_ttl(packet: dict, is_low: bool) -> tuple[float, int]:
+    """(fallback_deadline_ts, maker_ttl_s). The deadline (ABSOLUTE UTC, survives restart)
+    is when sweep() should cross an unfilled maker as a taker = now + (h_to_event -
+    window_close_lead - fb_lead)h. window_close_lead = the series' deep-window close
+    offset (LOW 1.5h / HIGH 2.5h); fb_lead fires the cross slightly before close.
+
+    2026-06-04 (Chris): the maker now RESTS until that deadline (ttl = deadline - now,
+    floored 30s) instead of a short 90s TTL. The old 90s churn relied on the EVENT-DRIVEN
+    eval re-firing to re-post, unreliable on thin pre-dawn LOW books (WS-quiet) -> the
+    maker was dropped and never re-posted, so the taker-fallback never fired (6/4: 14
+    posts, 10 ttl_expired, 0 crosses, 0 LOW fills). Resting to the deadline keeps a maker
+    on the book until sweep() 3b crosses it (if the edge still clears); the adverse-move
+    guard (3a) still cancels early on a hostile move. Only LOW + TAKER_FALLBACK_ENABLED
+    gets the long rest (HIGH is taker, no low_post); otherwise the base TTL is used."""
+    lc = packet.get("local_clock") or {}
+    h_to_evt = lc.get("h_to_min") if is_low else lc.get("h_to_peak")
+    try:
+        wc_lead = float((config.BLEND_DEEP_WINDOW_HOURS_LOW if is_low
+                         else config.BLEND_DEEP_WINDOW_HOURS)[1])
+    except Exception:
+        wc_lead = 1.5 if is_low else 2.5
+    fb_lead = float(getattr(config, "TAKER_FALLBACK_LEAD_H", 0.2))
+    if h_to_evt is not None:
+        fb_deadline = time.time() + max(0.0, (float(h_to_evt) - wc_lead - fb_lead)) * 3600.0
+    else:
+        fb_deadline = time.time() + float(getattr(config, "TAKER_FALLBACK_MAX_REST_S", 600))
+    base_ttl = int(getattr(config, "PUSH_LOW_POST_TTL_S", 0) or 0)
+    if is_low and getattr(config, "TAKER_FALLBACK_ENABLED", False):
+        ttl = max(30, int(fb_deadline - time.time()))
+    else:
+        ttl = base_ttl
+    return fb_deadline, ttl
+
+
 def place(rt, cand, packet: dict, entry_dec, side: str,
           decision: Optional[dict] = None) -> tuple[bool, str]:
     """Post a maker limit at MID for a LOW buy and register it to rest.
@@ -190,7 +224,9 @@ def place(rt, cand, packet: dict, entry_dec, side: str,
 
     spread_c = ask_c - bid_c
     state.claim_ticker(cand.ticker)
-    _ttl = int(getattr(config, "PUSH_LOW_POST_TTL_S", 0) or 0)
+    # Taker-fallback deadline + maker TTL: rest the maker until the deadline so the
+    # cross reliably fires (see _fallback_deadline_and_ttl). Computed BEFORE place_buy.
+    _fb_deadline, _ttl = _fallback_deadline_and_ttl(packet, cand.series_prefix == "KXLOW")
     _exp = (int(time.time()) + _ttl) if _ttl else None
     resp = kalshi_client.place_buy(
         cand.ticker, side, cnt, post_c, expiration_ts=_exp,
@@ -219,23 +255,6 @@ def place(rt, cand, packet: dict, entry_dec, side: str,
         "obs_anchor_reason": entry_dec.obs_anchor_reason,
         "model_prob": round(model_prob, 3) if model_prob is not None else None,
     }
-    # Taker-fallback deadline (2026-06-03): if still unfilled by ~window-close,
-    # sweep() crosses as a taker. Store an ABSOLUTE UTC ts (survives restart) =
-    # now + (h_to_event - window_close_lead - lead) hours. window_close_lead is the
-    # series' window-close offset (LOW 1.5h, HIGH 2.5h from the deep-window config).
-    lc = packet.get("local_clock") or {}
-    _is_low = (cand.series_prefix == "KXLOW")
-    _h_to_evt = lc.get("h_to_min") if _is_low else lc.get("h_to_peak")
-    try:
-        _wc_lead = float((config.BLEND_DEEP_WINDOW_HOURS_LOW if _is_low
-                          else config.BLEND_DEEP_WINDOW_HOURS)[1])
-    except Exception:
-        _wc_lead = 1.5 if _is_low else 2.5
-    _fb_lead = float(getattr(config, "TAKER_FALLBACK_LEAD_H", 0.2))
-    if _h_to_evt is not None:
-        _fb_deadline = time.time() + max(0.0, (float(_h_to_evt) - _wc_lead - _fb_lead)) * 3600.0
-    else:
-        _fb_deadline = time.time() + float(getattr(config, "TAKER_FALLBACK_MAX_REST_S", 600))
     row = {
         "order_id": order_id, "ticker": cand.ticker, "side": side,
         "post_c": post_c, "bid_c": bid_c, "ask_c": ask_c, "cross_c": ask_c,
