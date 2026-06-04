@@ -2033,6 +2033,9 @@ def _build_shadow_packet(cand: market_universe.Candidate) -> Optional[dict]:
         return None
     spread_c = max((yes_ask_c - yes_bid_c) if yes_bid_c else 100,
                    (no_ask_c - no_bid_c) if (no_bid_c is not None and no_ask_c is not None) else 100)
+    # 2026-06-04 (Chris): touch depth at decision time -> future fill/liquidity
+    # filter design (the thin-HIGH-book problem we can't currently backtest).
+    yes_bid_size, no_bid_size = kalshi_ws.get_touch_sizes(cand.ticker)
 
     # Wethr live obs
     wethr = shared_cache_reader._wethr_station_entry(cand.station) or {}
@@ -2147,6 +2150,8 @@ def _build_shadow_packet(cand: market_universe.Candidate) -> Optional[dict]:
         "no_bid_c": no_bid_c,
         "no_ask_c": no_ask_c,
         "spread_c": spread_c,
+        "yes_bid_size": yes_bid_size,
+        "no_bid_size": no_bid_size,
         "wethr_obs": wethr,
         "obs_trend_30m": trend30,
         "obs_trend_60m_regression": trend60 or {},
@@ -2283,7 +2288,9 @@ def _evaluate_ticker(ticker: str, trigger: str) -> None:
                 "climate_day": cand.climate_day,
                 "bracket": {"floor": cand.floor, "cap": cand.cap, "kind": cand.bracket_kind},
                 "market": {"yes_ask_c": pkt.get("yes_ask_c"), "no_ask_c": pkt.get("no_ask_c"),
-                           "spread_c": pkt.get("spread_c")},
+                           "spread_c": pkt.get("spread_c"),
+                           "yes_bid_c": pkt.get("yes_bid_c"), "no_bid_c": pkt.get("no_bid_c"),
+                           "yes_bid_size": pkt.get("yes_bid_size"), "no_bid_size": pkt.get("no_bid_size")},
                 "nn_fired": False,
                 "rm": pkt.get("running_min_or_max"),
                 **_wethr_obs_extra(cand.station),
@@ -2535,7 +2542,9 @@ def _evaluate_ticker(ticker: str, trigger: str) -> None:
             "climate_day": cand.climate_day,
             "bracket": {"floor": cand.floor, "cap": cand.cap, "kind": cand.bracket_kind},
             "market": {"yes_ask_c": pkt.get("yes_ask_c"), "no_ask_c": pkt.get("no_ask_c"),
-                       "spread_c": pkt.get("spread_c")},
+                       "spread_c": pkt.get("spread_c"),
+                       "yes_bid_c": pkt.get("yes_bid_c"), "no_bid_c": pkt.get("no_bid_c"),
+                       "yes_bid_size": pkt.get("yes_bid_size"), "no_bid_size": pkt.get("no_bid_size")},
             "nn_fired": True,
             "nn": {
                 "mu_method": pkt["mu_method"],

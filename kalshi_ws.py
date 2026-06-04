@@ -902,6 +902,24 @@ def get_orderbook(ticker: str) -> Optional[dict[str, list]]:
     }
 
 
+def get_touch_sizes(ticker: str) -> tuple[Optional[int], Optional[int]]:
+    """Read-only touch depth: (yes_bid_size, no_bid_size) = contracts resting at the
+    best bid on each book. Additive + fail-safe — logged per decision so future
+    fill/liquidity-filter design can ask "how deep was the book when we (skipped)
+    traded?" (the thin-HIGH-book fill problem we can't currently backtest).
+    NB the size you'd FILL against = the OPPOSITE book: BUY YES crosses NO bids
+    (-> no_bid_size), BUY NO crosses YES bids (-> yes_bid_size). None if no book."""
+    try:
+        yb = _yes_bids.get(ticker) or {}
+        nb = _no_bids.get(ticker) or {}
+        ys = yb.get(max(yb)) if yb else None
+        ns = nb.get(max(nb)) if nb else None
+        return (int(ys) if ys is not None else None,
+                int(ns) if ns is not None else None)
+    except Exception:
+        return (None, None)
+
+
 def get_stats() -> dict[str, Any]:
     with _cache_lock:
         n_cached = len(_bbo_cache)
