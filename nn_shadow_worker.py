@@ -1765,6 +1765,10 @@ def _try_auto_execute(cand, packet: dict, decision: dict,
         pass
     # (5) Position cap per (station, series_prefix, direction)
     cap_per_dir = int(getattr(_cfg, "PUSH_MAX_TICKERS_PER_STATION_SIDE_DIRECTION", 1))
+    # 2026-06-03 (Chris): HIGH BUY_NO may hold a 2nd same-station bracket — the 2nd
+    # wing NO is +EV via the sigma-play (cap_tiers.py). HIGH+NO scoped; YES/LOW unchanged.
+    if direction == "BUY_NO" and cand.series_prefix == "KXHIGH":
+        cap_per_dir = int(getattr(_cfg, "PUSH_MAX_TICKERS_PER_STATION_NO", cap_per_dir))
     n_existing = 0
     try:
         if hasattr(_rt, "positions"):
@@ -1833,7 +1837,8 @@ def _try_auto_execute(cand, packet: dict, decision: dict,
     side_label = "HIGH" if cand.series_prefix == "KXHIGH" else "LOW"
     cap_key = (cand.station, side_label, cand.climate_day)
     try:
-        cap = _cfg.GUARDRAILS.get("max_buys_per_station_side", 999)
+        cap = _cfg.GUARDRAILS.get(f"max_buys_per_station_side_{side_label.lower()}",
+                                  _cfg.GUARDRAILS.get("max_buys_per_station_side", 999))
         cycle_buys = getattr(_rt, "cycle_buys_by_station_side", {}).get(cap_key, 0)
         if cycle_buys >= cap:
             return False, f"correlation_cap {side_label}@{cand.station}"

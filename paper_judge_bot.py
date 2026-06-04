@@ -2811,7 +2811,8 @@ def run_entry_loop(rt: Runtime) -> None:
 
         _side = "HIGH" if cand.series_prefix == "KXHIGH" else "LOW"
         _key = (cand.station, _side, cand.climate_day)
-        _cap = config.GUARDRAILS.get("max_buys_per_station_side", 999)
+        _cap = config.GUARDRAILS.get(f"max_buys_per_station_side_{_side.lower()}",
+                                     config.GUARDRAILS.get("max_buys_per_station_side", 999))
         if rt.cycle_buys_by_station_side.get(_key, 0) >= _cap:
             rejection_counts[f"correlation_cap: {cand.station} {_side}"] += 1
             cand_rec["verdict"] = "skip_correlation_cap"

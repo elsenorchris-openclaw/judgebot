@@ -439,11 +439,15 @@ GUARDRAILS = {
     "min_conviction_for_buy": 0.83,        # cream of the crop only (Tier A)
     "min_size_factor_for_buy": 0.50,       # Claude's own sizing must also signal confidence
     "max_buys_per_cycle": 9999,               # cap total cycle exposure
-    "max_buys_per_station_side": 1,        # correlation guard:
-                                            # ≤ 2 BUYs per (city, HIGH|LOW) so
-                                            # Denver can have e.g. B83.5 + B85.5
-                                            # both NO without being 5-bracket
-                                            # all-or-nothing correlated.
+    "max_buys_per_station_side": 1,        # correlation guard (LOW default).
+    # 2026-06-03 (Chris): HIGH split to 2. The documented intent ("Denver can have
+    # B83.5 + B85.5 both NO") was never live because this was 1. The 2nd same-station
+    # HIGH NO is +EV (+3.9c/ct, WR 0.87, +EV in BOTH backtest halves over 835
+    # station-days; ~/judge_dyn/cap_tiers.py) via the sigma-play: an under-confident
+    # market over-prices MORE than one neighbor when the blend is confident. HIGH=2
+    # makes the 2nd wing-NO intentional + BOUNDED (rank-4+ is -EV). LOW stays 1
+    # (untested for LOW). Pairs w/ PUSH_MAX_TICKERS_PER_STATION_NO.
+    "max_buys_per_station_side_high": 2,   # HIGH-only correlation cap (see note above)
     # Price
     "min_price_cents": 5,
     # Insufficient-funds skip: if wallet balance is below this, the entry
@@ -1021,6 +1025,14 @@ PUSH_RM_GRACE_SEC_HIGH: float = 3600.0
 # Max positions per (station, series, direction). 1 → at most one BUY_YES and
 # one BUY_NO ticker active per station per series at any time.
 PUSH_MAX_TICKERS_PER_STATION_SIDE_DIRECTION: int = 1
+# 2026-06-03 (Chris): HIGH BUY_NO-only override → 2. Lets a station hold TWO BUY_NO
+# brackets (the 2nd-best same-station wing NO is +EV via the sigma-play: +3.9c/ct,
+# WR 0.87, +EV in both halves over 835 station-days; ~/judge_dyn/{cap_tiers,satellite_no}.py).
+# HIGH-scoped + NO-scoped only — YES stays 1, LOW stays 1 (both untested for >1).
+# Bounded at 2 by design: rank-3 adds only +$6, rank-4+ is -EV (over-fishing one
+# forecast). MUST pair w/ GUARDRAILS max_buys_per_station_side_high=2, else the
+# correlation cap re-blocks the 2nd leg. Rollback → set back to 1.
+PUSH_MAX_TICKERS_PER_STATION_NO: int = 2
 
 # Pace-curve source files for empirical peak/min lookup
 PUSH_PACE_CURVES_HIGH_PATH: str = "/home/ubuntu/data/pace_curves_v2.json"

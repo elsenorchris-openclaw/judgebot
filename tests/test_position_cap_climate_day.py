@@ -102,10 +102,16 @@ class TestPositionCapClimateDay(unittest.TestCase):
                          f"prior-day position blocked today's BUY: {reason}")
 
     def test_same_day_position_still_blocks(self):
-        """Regression: a same-day BUY_NO position MUST still block another
-        BUY_NO on the same (station, series_prefix). This is the original
-        cap behavior — only prior-day positions should be ignored."""
+        """Same-day BUY_NO positions MUST count toward the cap (only prior-day
+        positions are ignored — that is what this test exists to pin). 2026-06-03:
+        HIGH NO cap was raised to 2 (PUSH_MAX_TICKERS_PER_STATION_NO, +EV 2nd
+        wing NO via the sigma-play), so it takes TWO same-day NOs before blocking
+        the 3rd. The climate_day scoping under test is unchanged."""
         positions = {
+            "KXHIGHTNOLA-26MAY20-B84.5": {
+                "station": "KMSY", "action": "BUY_NO",
+                "cost": 4.5, "date_str": "2026-05-20",
+            },
             "KXHIGHTNOLA-26MAY20-B86.5": {
                 "station": "KMSY", "action": "BUY_NO",
                 "cost": 4.5, "date_str": "2026-05-20",
@@ -118,7 +124,7 @@ class TestPositionCapClimateDay(unittest.TestCase):
         )
         executed, reason = self._run(positions, cand, _make_decision("BUY_NO"))
         self.assertFalse(executed, f"same-day cap failed to block: {reason}")
-        self.assertIn("position_cap", reason)
+        self.assertIn("position_cap", reason)   # now 2>=2
 
     def test_prior_day_position_different_direction_irrelevant(self):
         """Prior-day BUY_YES position must not block today's BUY_NO either
