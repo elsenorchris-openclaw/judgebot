@@ -64,10 +64,12 @@ class _CapBase(unittest.TestCase):
         self._orig_rt = nsw._rt
         self._orig_window = nsw._in_decision_window
         nsw._in_decision_window = lambda *a, **kw: (True, "test-window")
+        nsw._pending_buys.clear()   # 2026-06-05: no in-flight reservations leak between tests
 
     def tearDown(self):
         nsw._rt = self._orig_rt
         nsw._in_decision_window = self._orig_window
+        nsw._pending_buys.clear()
 
     def _run(self, cand, decision, series, positions, cycle_buys=None, local_hour=12.0):
         nsw._rt = SimpleNamespace(positions=positions,
@@ -160,6 +162,38 @@ class TestCorrelationCapSeriesAware(_CapBase):
         executed, reason = self._run(cand, _decision("BUY_NO"), "LOW", {}, cycle_buys=cyc, local_hour=4.0)
         self.assertFalse(executed)
         self.assertIn("correlation_cap", reason)
+
+
+class TestCapReservation(_CapBase):
+    """Gate-5 in-flight reservation closes the cross-thread TOCTOU cap race (2026-06-05)."""
+
+    def test_reservation_counts_toward_cap(self):
+        """0 positions but 2 in-flight reservations (cap=2 via _run) -> the next NO is
+        BLOCKED — a concurrent thread mid-place occupies the slot, so the race can't
+        place past the cap."""
+        nsw._pending_buys[("KMIA", "KXHIGH", "BUY_NO")] = 2
+        cand = _cand("KXHIGHMIA-26MAY31-B85.5", "KXHIGH")
+        executed, reason = self._run(cand, _decision("BUY_NO"), "HIGH", {})
+        self.assertFalse(executed)
+        self.assertIn("position_cap", reason)
+        self.assertIn("2>=2", reason)
+
+    def test_reservation_released_after_buy(self):
+        """A successful buy reserves then releases (execution finally) -> no leak."""
+        cand = _cand("KXHIGHMIA-26MAY31-B85.5", "KXHIGH")
+        executed, reason = self._run(cand, _decision("BUY_NO"), "HIGH", {})
+        self.assertNotIn("position_cap", reason)            # 0 positions + 0 reservations -> allowed
+        self.assertEqual(nsw._pending_buys.get(("KMIA", "KXHIGH", "BUY_NO"), 0), 0)  # released
+
+    def test_reservation_released_on_later_gate_reject(self):
+        """A reject AFTER the reservation (gate-7 correlation cap) must release it, not
+        leak it (a leak would permanently block the station/dir)."""
+        cyc = {("KMIA", "HIGH", "2026-05-31"): 2}   # HIGH corr cap=2 -> reject
+        cand = _cand("KXHIGHMIA-26MAY31-B85.5", "KXHIGH")
+        executed, reason = self._run(cand, _decision("BUY_NO"), "HIGH", {}, cycle_buys=cyc)
+        self.assertFalse(executed)
+        self.assertIn("correlation_cap", reason)
+        self.assertEqual(nsw._pending_buys.get(("KMIA", "KXHIGH", "BUY_NO"), 0), 0)  # not leaked
 
 
 if __name__ == "__main__":

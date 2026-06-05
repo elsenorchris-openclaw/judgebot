@@ -491,6 +491,77 @@ WETHR_EVENT_SOCK_PATH = "/tmp/wethr_events.sock"
 _log_writer_lock = threading.Lock()
 _per_ticker_locks: dict[str, threading.Lock] = {}
 _per_ticker_locks_lock = threading.Lock()
+# 2026-06-05 (audit): per-(station,series,direction) in-flight buy reservations so the 3
+# concurrent eval threads (WS callback, wethr-poll, wethr-SSE) can't race two same-
+# (station,dir) brackets past the gate-5 position cap — a TOCTOU where both read
+# n_existing<cap before either records its position. The count+check+reserve is atomic
+# under _pending_buys_lock; the reservation is released in _try_auto_execute's execution
+# finally / on its gate-6,7 rejects.
+_pending_buys: dict = {}
+_pending_buys_lock = threading.Lock()
+
+
+def _release_pending(cap_key) -> None:
+    """Release a per-(station,series,direction) in-flight buy reservation. Bulletproof
+    (never raises) so a caller can put it before a return without risking the return."""
+    try:
+        with _pending_buys_lock:
+            v = _pending_buys.get(cap_key, 0) - 1
+            if v > 0:
+                _pending_buys[cap_key] = v
+            else:
+                _pending_buys.pop(cap_key, None)
+    except Exception:
+        pass
+
+
+def _count_existing_slots(cand, direction) -> int:
+    """Filled positions + resting maker orders occupying this (station, series, direction,
+    climate_day) slot = the gate-5 position-cap occupancy. Call under _pending_buys_lock."""
+    n = 0
+    try:
+        if hasattr(_rt, "positions"):
+            sp = cand.series_prefix
+            for tk, p in (_rt.positions or {}).items():
+                if not isinstance(p, dict):
+                    continue
+                try:
+                    if float(p.get("cost", 0)) <= 0:
+                        continue
+                except (TypeError, ValueError):
+                    continue
+                if p.get("station") != cand.station:
+                    continue
+                if not str(tk).startswith(sp):
+                    continue
+                if p.get("action") != direction:
+                    continue
+                pos_date = p.get("date_str") or p.get("climate_day")
+                if pos_date and pos_date != cand.climate_day:
+                    continue
+                n += 1
+    except Exception:
+        pass
+    try:
+        import low_post_probe
+        pos_tickers = set(getattr(_rt, "positions", {}) or {})
+        for r in low_post_probe.resting_rows():
+            tk = str(r.get("ticker", ""))
+            if tk == cand.ticker or tk in pos_tickers:
+                continue
+            if not tk.startswith(cand.series_prefix):
+                continue
+            ctx = r.get("entry_ctx") or {}
+            if ctx.get("station") != cand.station:
+                continue
+            if ctx.get("action") != direction:
+                continue
+            if str(r.get("climate_day", "")) != cand.climate_day:
+                continue
+            n += 1
+    except Exception:
+        pass
+    return n
 _last_eval_ts: dict[str, float] = {}
 _last_eval_lock = threading.Lock()
 _wethr_obs_ts_seen: dict[str, float] = {}  # station → last obs_ts processed
@@ -1799,73 +1870,29 @@ def _try_auto_execute(cand, packet: dict, decision: dict,
             return False, f"already_held_cost_${float(pos.get('cost', 0)):.2f}"
     except Exception:
         pass
-    # (5) Position cap per (station, series_prefix, direction)
-    cap_per_dir = int(getattr(_cfg, "PUSH_MAX_TICKERS_PER_STATION_SIDE_DIRECTION", 1))
-    # 2026-06-03 (Chris): HIGH BUY_NO may hold a 2nd same-station bracket — the 2nd
-    # wing NO is +EV via the sigma-play (cap_tiers.py). HIGH+NO scoped; YES/LOW unchanged.
-    if direction == "BUY_NO" and cand.series_prefix == "KXHIGH":
-        cap_per_dir = int(getattr(_cfg, "PUSH_MAX_TICKERS_PER_STATION_NO", cap_per_dir))
-    n_existing = 0
-    try:
-        if hasattr(_rt, "positions"):
-            series_prefix = cand.series_prefix  # "KXHIGH" or "KXLOW"
-            for tk, p in (_rt.positions or {}).items():
-                if not isinstance(p, dict):
-                    continue
-                try:
-                    if float(p.get("cost", 0)) <= 0:
-                        continue
-                except (TypeError, ValueError):
-                    continue
-                if p.get("station") != cand.station:
-                    continue
-                if not str(tk).startswith(series_prefix):
-                    continue
-                if p.get("action") != direction:
-                    continue
-                # 2026-05-20: scope cap to candidate's climate_day so a stuck
-                # prior-day position (e.g. KMSY 5/19 Kalshi-pending settlement)
-                # doesn't block today's BUYs on the same station+series.
-                pos_date = p.get("date_str") or p.get("climate_day")
-                if pos_date and pos_date != cand.climate_day:
-                    continue
-                n_existing += 1
-    except Exception:
-        pass
-    # 2026-05-25: a resting LOW posting-probe order (low_post_probe posts a maker
-    # at mid and rests until it fills) is not yet in _rt.positions, so a second
-    # same-direction bracket on the same station/day could slip past this cap
-    # before the first fills (e.g. LV 5/25 took two BUY_YES). Count resting
-    # orders toward the same per-(station, direction) slot. Same-ticker re-evals
-    # are caught by has_resting() in the LOW branch below, so skip them here.
-    try:
-        import low_post_probe
-        pos_tickers = set(getattr(_rt, "positions", {}) or {})
-        for r in low_post_probe.resting_rows():
-            tk = str(r.get("ticker", ""))
-            if tk == cand.ticker or tk in pos_tickers:
-                continue
-            if not tk.startswith(cand.series_prefix):
-                continue
-            ctx = r.get("entry_ctx") or {}
-            if ctx.get("station") != cand.station:
-                continue
-            if ctx.get("action") != direction:
-                continue
-            if str(r.get("climate_day", "")) != cand.climate_day:
-                continue
-            n_existing += 1
-    except Exception:
-        pass
-    if n_existing >= cap_per_dir:
-        return False, (f"position_cap {direction}@{cand.station}/{cand.series_prefix}: "
-                       f"{n_existing}>={cap_per_dir}")
+    # (5) Position cap per (station, series_prefix, direction). 2026-06-05 (audit): the
+    # count + cap check + reservation are ATOMIC under _pending_buys_lock so the 3 eval
+    # threads can't race two same-(station,dir) brackets past the cap (TOCTOU). The
+    # reservation is released in the execution finally / on the gate-6,7 rejects below.
+    # 2026-06-03 (Chris): HIGH BUY_NO may hold a 2nd same-station bracket (sigma-play,
+    # cap_tiers.py); HIGH+NO scoped, PUSH_MAX_TICKERS_PER_STATION_NO reverted to 1 on 6/5.
+    _cap_key = (cand.station, cand.series_prefix, direction)
+    with _pending_buys_lock:
+        cap_per_dir = int(getattr(_cfg, "PUSH_MAX_TICKERS_PER_STATION_SIDE_DIRECTION", 1))
+        if direction == "BUY_NO" and cand.series_prefix == "KXHIGH":
+            cap_per_dir = int(getattr(_cfg, "PUSH_MAX_TICKERS_PER_STATION_NO", cap_per_dir))
+        n_existing = _count_existing_slots(cand, direction) + _pending_buys.get(_cap_key, 0)
+        if n_existing >= cap_per_dir:
+            return False, (f"position_cap {direction}@{cand.station}/{cand.series_prefix}: "
+                           f"{n_existing}>={cap_per_dir}")
+        _pending_buys[_cap_key] = _pending_buys.get(_cap_key, 0) + 1
     # (6) Cash check
     try:
         import kalshi_client as _kc
         balance = _kc.get_balance_cached()
         min_buy = float(getattr(_cfg, "MIN_BUY_USD", 1.0))
         if balance is not None and balance < min_buy:
+            _release_pending(_cap_key)
             return False, f"low_cash_${balance:.2f}<${min_buy:.2f}"
     except Exception:
         pass
@@ -1877,6 +1904,7 @@ def _try_auto_execute(cand, packet: dict, decision: dict,
                                   _cfg.GUARDRAILS.get("max_buys_per_station_side", 999))
         cycle_buys = getattr(_rt, "cycle_buys_by_station_side", {}).get(cap_key, 0)
         if cycle_buys >= cap:
+            _release_pending(_cap_key)
             return False, f"correlation_cap {side_label}@{cand.station}"
     except Exception:
         pass
@@ -1952,6 +1980,11 @@ def _try_auto_execute(cand, packet: dict, decision: dict,
     except Exception as e:
         log.exception("auto-execute crashed for %s: %s", cand.ticker, e)
         return False, f"exception: {e}"
+    finally:
+        # release the gate-5 reservation on EVERY execution-path exit (place /
+        # execute_buy / post_already_active / exception) — the slot is now held by the
+        # recorded position instead. (gate-5 reject + gate-6,7 rejects release inline.)
+        _release_pending(_cap_key)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
