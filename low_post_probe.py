@@ -399,16 +399,16 @@ def _taker_fallback(rt, row: dict, held: set) -> bool:
         return False
     # 3) Our maker filled (fully/partially) -> adopt that fill, never cross.
     if our_filled > 0:
+        # 2026-06-05 (audit): adopt the LARGER of REST (order_filled_count = authoritative
+        # fill_count_fp) and the WS fill cache (which can lag / be evicted and UNDER-report).
+        # The old code PREFERRED WS whenever it was >0, so a partial/evicted WS count
+        # silently under-recorded the fill -> real contracts left untracked in _rt.positions
+        # (they settle on Kalshi but the bot's P&L/exit never sees them; reconcile is
+        # drop-only). A maker fills at its limit (post_c), so adopt at post_c.
         f = kalshi_ws.get_fill(oid)
-        if f and int(float(f.get("total_count") or 0)) > 0:
-            fl = int(float(f["total_count"]))
-            notional = (f.get("total_no_notional_dollars") if side == "no"
-                        else f.get("total_yes_notional_dollars")) or 0.0
-            _adopt(rt, row, fl, (notional / fl) if fl else row.get("post_c", 0) / 100.0,
-                   via="maker_fill_at_deadline")
-        else:
-            _adopt(rt, row, our_filled, row.get("post_c", 0) / 100.0,
-                   via="maker_fill_at_deadline")
+        ws_fl = int(float(f.get("total_count") or 0)) if f else 0
+        fl = max(our_filled, ws_fl)
+        _adopt(rt, row, fl, row.get("post_c", 0) / 100.0, via="maker_fill_at_deadline")
         return True
     # 4) Held by the wallet but OUR order is 0-filled -> another bot's position.
     try:

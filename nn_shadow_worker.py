@@ -252,18 +252,26 @@ def _dst_offset_h(station: str) -> float:
 
 
 def _station_local_date(station: str) -> Optional[str]:
-    """Station's CURRENT wall-clock (LDT) calendar date as 'YYYY-MM-DD' — the
-    convention Kalshi uses for a bracket's climate_day. None on any tz miss/failure
-    (callers fail OPEN). Used by the window gate to refuse a bracket whose extreme
-    is on a different calendar date than now (e.g. a next-day bracket open during
-    today's deep window)."""
+    """Station's CURRENT LOCAL-STANDARD-TIME (LST) calendar date as 'YYYY-MM-DD' — the
+    NWS climate-day / Kalshi climate_day convention (midnight-to-midnight STANDARD time,
+    NOT wall-clock LDT). None on any tz miss/failure (callers fail OPEN). Used by the
+    window gate to refuse a bracket whose extreme is on a different calendar date than
+    now (e.g. a next-day bracket open during today's deep window)."""
     try:
         import climate_normals as _cn
         tz = _cn._STATION_TZ.get(station)
         if not tz:
             return None
         from zoneinfo import ZoneInfo
-        return _dtm.datetime.now(ZoneInfo(tz)).strftime("%Y-%m-%d")
+        # 2026-06-05 (audit): LST, not wall-clock LDT. They differ only during the DST
+        # hour 00:00-01:00 LDT, but LDT there would reject today's LST-day bracket and
+        # could accept a next-day one (the ~24h-early class this guard exists to prevent).
+        # Shift UTC by the STANDARD (January) offset = LST.
+        now = _dtm.datetime.now(_dtm.timezone.utc)
+        jan = _dtm.datetime(now.year, 1, 15, 12, tzinfo=_dtm.timezone.utc).astimezone(ZoneInfo(tz)).utcoffset()
+        if jan is None:
+            return None
+        return (now + jan).strftime("%Y-%m-%d")
     except Exception:
         return None
 
