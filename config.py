@@ -1045,6 +1045,27 @@ PUSH_MAX_TICKERS_PER_STATION_SIDE_DIRECTION: int = 1
 # 1 NO + 1 YES/station. Re-raise to 2 once the settled tape confirms the live edge holds.
 PUSH_MAX_TICKERS_PER_STATION_NO: int = 1
 
+# 2026-06-05 (Chris): ONE bracket per station-day for HIGH, across BOTH directions,
+# selecting the MAX-EDGE bracket. Extends the 6/5 NO-cap revert. The bot's real unit
+# of risk is the station FORECAST, not the bracket: 2-3 brackets/station just lever one
+# forecast — when mu misses, the stacked legs lose together (6/4: MIA/DC/CHI/ATL each
+# lost BOTH legs, -$18 to -$20/station). Backtest (14mo, edge>=10%, net fee;
+# /tmp/sizefinal.py + legpick.py on judge_dyn/blend_rows.pkl): one-best-bracket/station
+# cuts the worst-5% station-day drawdown ~3x (-$1930 -> -$636) AND lifts per-stn-day
+# Sharpe 0.085->0.089 (robust both halves) — the 2nd/3rd legs are low-edge + correlated,
+# so they add more variance than return. On the 6/4 tape it would have been -$23 vs -$71.
+# CRITICAL: a greedy first-qualify cap would risk committing the WORST leg (Sharpe
+# collapses to 0.022), so the gate only commits a bracket when NO currently-quoted
+# sibling has a higher edge (max-edge-among-quoted-siblings — an event-driven
+# approximation of the backtest's single-snapshot best-leg; the global max is always
+# quoted in the deep window so it is reachable). HIGH-only; LOW unaffected (separate
+# thin/$1 edge). Rollback -> False (reverts to per-direction caps: 1 NO + 1 YES).
+# cf project_blend_tracking_20260603 6/5.
+PUSH_ONE_BRACKET_PER_STATION_HIGH: bool = True
+# A quoted sibling must beat the current bracket's edge by MORE than this (pp) to block
+# it — avoids float-noise thrash on near-ties (the cap-1 still prevents a double-buy).
+PUSH_ONE_BRACKET_EDGE_TOL_PP: float = 0.25
+
 # Pace-curve source files for empirical peak/min lookup
 PUSH_PACE_CURVES_HIGH_PATH: str = "/home/ubuntu/data/pace_curves_v2.json"
 PUSH_PACE_CURVES_LOW_PATH: str = "/home/ubuntu/data/pace_curves_low_v2.json"

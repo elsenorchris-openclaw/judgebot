@@ -1452,6 +1452,83 @@ def _paper_record_entry(cand, packet, decision, direction, ask_c_i, series, edge
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# One-bracket-per-station-day selection (PUSH_ONE_BRACKET_PER_STATION_HIGH).
+# The blend mu/sigma is shared across a station-day's brackets, so a sibling's
+# edge is a cheap normal-CDF integral (mirrors nn_shadow_strategy._yes_window:
+# B=[floor-0.5, cap+0.5); T-warm(floor only)=[floor+0.5, inf); T-cold(cap only)=
+# (-inf, cap-0.5)). Both the self and sibling edges go through _bracket_edge_pp
+# so the comparison is apples-to-apples (independent of the decision's own edge).
+# ─────────────────────────────────────────────────────────────────────────────
+def _bracket_edge_pp(floor, cap, yes_bid_c, yes_ask_c, mu, sigma) -> Optional[float]:
+    """Best-side edge (in pp) for one bracket under blend mu/sigma. None if uncomputable.
+    Bracket shape is inferred from floor/cap presence (B = both; T-warm = floor only;
+    T-cold = cap only), matching the (2t) tail-bet gate's _yes_window convention."""
+    import math as _math
+    try:
+        mu = float(mu); sigma = float(sigma)
+        ya_c = float(yes_ask_c); yb_c = float(yes_bid_c)
+    except (TypeError, ValueError):
+        return None
+    if not (sigma > 0) or not (0 < ya_c <= 100) or ya_c <= yb_c:
+        return None
+
+    def _phi(x):
+        return 0.5 * (1.0 + _math.erf(x / _math.sqrt(2.0)))
+
+    fl = None if floor is None else float(floor)
+    cp = None if cap is None else float(cap)
+    if fl is not None and cp is not None:
+        p_yes = _phi((cp + 0.5 - mu) / sigma) - _phi((fl - 0.5 - mu) / sigma)
+    elif fl is not None:                       # T-warm (>= floor)
+        p_yes = 1.0 - _phi((fl + 0.5 - mu) / sigma)
+    elif cp is not None:                       # T-cold (<= cap)
+        p_yes = _phi((cp - 0.5 - mu) / sigma)
+    else:
+        return None
+    no_ask_c = 100.0 - yb_c
+    edge_yes = p_yes - ya_c / 100.0
+    edge_no = (1.0 - p_yes) - no_ask_c / 100.0
+    return max(edge_yes, edge_no) * 100.0
+
+
+def _max_sibling_edge_pp(cand, mu, sigma) -> tuple[Optional[float], Optional[str]]:
+    """Max best-side edge (pp) among this station-day's OTHER currently-quoted brackets,
+    using the shared blend mu/sigma. Returns (max_edge_pp, ticker) or (None, None).
+    Mirrors _compute_market_mu's BBO-cache enumeration + 10-min staleness bound. Called
+    OUTSIDE _pending_buys_lock (read-only on the WS cache) to keep the lock hold brief."""
+    if mu is None or sigma is None:
+        return None, None
+    prefix = cand.series_prefix
+    best_pp = None
+    best_tk = None
+    now = time.time()
+    try:
+        for tk in list(kalshi_ws._bbo_cache.keys()):
+            if tk == cand.ticker or not tk.startswith(prefix):
+                continue
+            c2 = market_universe.parse_ticker(tk)
+            if not c2 or c2.station != cand.station or c2.climate_day != cand.climate_day:
+                continue
+            ce = kalshi_ws._bbo_cache.get(tk)
+            if not ce or (now - ce.get("ts", 0) > 600):
+                continue
+            yb = ce.get("yes_bid")
+            ya = ce.get("yes_ask")
+            if yb is None or ya is None:
+                continue
+            e_pp = _bracket_edge_pp(c2.floor, c2.cap,
+                                    yb * 100.0, ya * 100.0, mu, sigma)
+            if e_pp is None:
+                continue
+            if best_pp is None or e_pp > best_pp:
+                best_pp = e_pp
+                best_tk = tk
+    except Exception:
+        return None, None
+    return best_pp, best_tk
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Auto-execute via real Kalshi order (push pure-code architecture)
 # ─────────────────────────────────────────────────────────────────────────────
 def _try_auto_execute(cand, packet: dict, decision: dict,
@@ -1876,16 +1953,49 @@ def _try_auto_execute(cand, packet: dict, decision: dict,
     # reservation is released in the execution finally / on the gate-6,7 rejects below.
     # 2026-06-03 (Chris): HIGH BUY_NO may hold a 2nd same-station bracket (sigma-play,
     # cap_tiers.py); HIGH+NO scoped, PUSH_MAX_TICKERS_PER_STATION_NO reverted to 1 on 6/5.
+    # 2026-06-05 (Chris): ONE bracket per station-day for HIGH, across BOTH directions,
+    # committing the MAX-EDGE bracket (PUSH_ONE_BRACKET_PER_STATION_HIGH). Backtest:
+    # cuts worst-5% station-day drawdown ~3x + lifts Sharpe vs stacking correlated legs.
+    # The sibling scan is read-only on the WS cache → done BEFORE the lock so the lock
+    # hold (count+reserve) stays brief. Self+sibling edges both go through
+    # _bracket_edge_pp (apples-to-apples; independent of the decision's own edge).
+    _one_per_stn = (bool(getattr(_cfg, "PUSH_ONE_BRACKET_PER_STATION_HIGH", False))
+                    and cand.series_prefix == "KXHIGH")
+    _self_edge = _msib_edge = None
+    _msib_tk = None
+    if _one_per_stn:
+        _mu_c = packet.get("mu_chosen")
+        _sig_c = packet.get("sigma_chosen")
+        _self_edge = _bracket_edge_pp(cand.floor, cand.cap,
+                                      packet.get("yes_bid_c"), packet.get("yes_ask_c"),
+                                      _mu_c, _sig_c)
+        _msib_edge, _msib_tk = _max_sibling_edge_pp(cand, _mu_c, _sig_c)
     _cap_key = (cand.station, cand.series_prefix, direction)
     with _pending_buys_lock:
-        cap_per_dir = int(getattr(_cfg, "PUSH_MAX_TICKERS_PER_STATION_SIDE_DIRECTION", 1))
-        if direction == "BUY_NO" and cand.series_prefix == "KXHIGH":
-            cap_per_dir = int(getattr(_cfg, "PUSH_MAX_TICKERS_PER_STATION_NO", cap_per_dir))
-        n_existing = _count_existing_slots(cand, direction) + _pending_buys.get(_cap_key, 0)
-        if n_existing >= cap_per_dir:
-            return False, (f"position_cap {direction}@{cand.station}/{cand.series_prefix}: "
-                           f"{n_existing}>={cap_per_dir}")
-        _pending_buys[_cap_key] = _pending_buys.get(_cap_key, 0) + 1
+        if _one_per_stn:
+            # cap = 1 bracket/station-day across BOTH directions (filled + resting + pending)
+            _stn_n = (_count_existing_slots(cand, "BUY_NO")
+                      + _count_existing_slots(cand, "BUY_YES")
+                      + _pending_buys.get((cand.station, cand.series_prefix, "BUY_NO"), 0)
+                      + _pending_buys.get((cand.station, cand.series_prefix, "BUY_YES"), 0))
+            if _stn_n >= 1:
+                return False, f"one_bracket_per_station {cand.station}/{cand.series_prefix}: {_stn_n}>=1"
+            # don't commit a lesser bracket while a higher-edge sibling is quoted
+            _tol = float(getattr(_cfg, "PUSH_ONE_BRACKET_EDGE_TOL_PP", 0.25))
+            if (_self_edge is not None and _msib_edge is not None
+                    and _msib_edge > _self_edge + _tol):
+                return False, (f"not_best_bracket {cand.station}: sibling {_msib_tk} "
+                               f"edge {_msib_edge:.1f}pp > self {_self_edge:.1f}pp")
+            _pending_buys[_cap_key] = _pending_buys.get(_cap_key, 0) + 1
+        else:
+            cap_per_dir = int(getattr(_cfg, "PUSH_MAX_TICKERS_PER_STATION_SIDE_DIRECTION", 1))
+            if direction == "BUY_NO" and cand.series_prefix == "KXHIGH":
+                cap_per_dir = int(getattr(_cfg, "PUSH_MAX_TICKERS_PER_STATION_NO", cap_per_dir))
+            n_existing = _count_existing_slots(cand, direction) + _pending_buys.get(_cap_key, 0)
+            if n_existing >= cap_per_dir:
+                return False, (f"position_cap {direction}@{cand.station}/{cand.series_prefix}: "
+                               f"{n_existing}>={cap_per_dir}")
+            _pending_buys[_cap_key] = _pending_buys.get(_cap_key, 0) + 1
     # (6) Cash check
     try:
         import kalshi_client as _kc

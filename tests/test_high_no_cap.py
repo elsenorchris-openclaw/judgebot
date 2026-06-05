@@ -77,6 +77,11 @@ class _CapBase(unittest.TestCase):
         packet = _packet(decision["decision"], series, cand.floor, cand.cap)
         with ExitStack() as es:
             P = lambda n, v: es.enter_context(mock.patch.object(config, n, v))
+            # 2026-06-05: these pin the LEGACY per-(station,direction) cap (the rollback
+            # path). The new default PUSH_ONE_BRACKET_PER_STATION_HIGH=True caps at 1
+            # bracket/station across both directions and is covered by
+            # test_one_bracket_per_station.py — pin it OFF here to test the legacy path.
+            P("PUSH_ONE_BRACKET_PER_STATION_HIGH", False)
             P("PUSH_MAE_GATE_ENABLED", False)
             P("USE_MU_AGREEMENT_GATE", False)
             P("PUSH_HIGH_SKIP_IF_OFF_PEAK_F", 0.0)

@@ -72,7 +72,19 @@ edge floor (NO `PUSH_MIN_EDGE_PP=2` / YES `=2`) · in-bracket tail-bet gate (`=2
 · thin-margin-NO (off) · NBM-veto (off) · σ-floor (1.0, per-station floors exempt
 for blend) / σ-ceiling (2.5) · physics (vsby<0.5mi, wind>40mph) · LOW front-wind
 (≥18mph) · price band (NO≥25 / YES≥30 / LOW-NO≥10 / ≤90) · HIGH off-peak veto ·
-position dedup · 1-per-(station,series,dir,day) cap · cash · correlation cap.
+position dedup · **per-station cap** · cash · correlation cap.
+
+**Per-station cap (`PUSH_ONE_BRACKET_PER_STATION_HIGH=True`, 2026-06-05).** HIGH is
+capped at **1 bracket per station-day across BOTH directions**, committing only the
+**max-edge** bracket: a buy is blocked if a currently-quoted sibling (same station-day,
+from the WS BBO cache, scored on the shared blend μ/σ via `_bracket_edge_pp`) has a
+higher edge. The bot's real unit of risk is the station *forecast*, not the bracket;
+stacking 2–3 correlated brackets just levers one forecast (6/4: MIA/DC/CHI/ATL each lost
+*both* legs). Backtest (14mo, `judge_dyn/blend_rows.pkl`): one-best-bracket/station cuts
+the worst-5% station-day drawdown ~3× (−$1930→−$636) and lifts per-stn-day Sharpe
+0.085→0.089; on the 6/4 tape it would have been −$23 vs −$71. Max-edge selection (not
+greedy first-qualify) is required — committing the *worst* leg collapses Sharpe to 0.022.
+Rollback → `False` reverts to the legacy per-(station,series,dir,day) cap. LOW unaffected.
 
 ### Sizing
 HIGH base `PUSH_HIGH_MAX_BET_DEFAULT=$5` (NO), `PUSH_HIGH_YES_MAX_BET_USD=$5`;

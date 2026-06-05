@@ -12,6 +12,7 @@ from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import config  # noqa: E402
 import market_universe  # noqa: E402
 import nn_shadow_worker as nsw  # noqa: E402
 
@@ -71,7 +72,10 @@ class TestPositionCapClimateDay(unittest.TestCase):
         )
         import paper_judge_bot as pjb
         import kalshi_client
+        # 2026-06-05: pin the LEGACY per-direction cap (rollback path); the new default
+        # one-bracket-per-station is covered by test_one_bracket_per_station.py.
         with mock.patch.object(pjb, "execute_buy", lambda *a, **kw: None), \
+             mock.patch.object(config, "PUSH_ONE_BRACKET_PER_STATION_HIGH", False), \
              mock.patch.object(kalshi_client, "get_balance_cached",
                                return_value=100.0):
             return nsw._try_auto_execute(
