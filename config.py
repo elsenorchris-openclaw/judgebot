@@ -642,7 +642,7 @@ CLIMATE_DAY_GUARD_ENABLED: bool = True
 # peak/min, not a flat plateau where the argmax is just noise). Catches real front days
 # AND rejects noise (a distance-from-climo bound can't tell them apart). False = pure
 # empirical-LST climatology (the shipped LST clock).
-FORECAST_ANCHOR_ENABLED: bool = True
+FORECAST_ANCHOR_ENABLED: bool = False  # 2026-06-05 (Chris): DISABLED — it was dragging the peak/min hour EARLIER on flat-topped curves (it anchors to the live NWP argmax, which on a marine/plateau day picks an early hour): SFO climo 13.4->11.0, LAX 13.5->11.0, BOS 14.4->12.0 -> the deep window (peak-4) opened 2-6h too early (SFO bought 07:00 LST = 6h before the real high, on a weak forecast). On since 6/3 = mis-timed entries the whole time. Revert to the sound empirical LST climo. Re-enable ONLY with a bounded/sharp-peak guard + a P&L backtest. Rollback ->True.
 FORECAST_FLAT_TOL_F: float = 1.0       # hours within this many F of the extreme count as "near"
 FORECAST_FLAT_MAX_HOURS: int = 3       # <= this many near-hours = sharp (trust the forecast timing)
 FC_BAND_EDGE_MARGIN_H: float = 0.5     # distrust a forecast extreme within this of the search-band edge (likely clipped)
