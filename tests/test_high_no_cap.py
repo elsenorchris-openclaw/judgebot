@@ -84,6 +84,10 @@ class _CapBase(unittest.TestCase):
             P("AUTO_EXEC_LOW_ENABLED", True)
             P("PUSH_HIGH_POST_AT_MID", False)
             P("PUSH_LOW_POST_AT_MID", True)
+            # Pin the NO cap to 2 so this tests the cap-2 LOGIC regardless of the live
+            # default (reverted to 1 on 2026-06-05 as a de-risk). The mechanism is what's
+            # under test here; the live default is a separate config choice.
+            P("PUSH_MAX_TICKERS_PER_STATION_NO", 2)
             es.enter_context(mock.patch.object(pjb, "execute_buy", lambda *a, **kw: None))
             es.enter_context(mock.patch.object(kalshi_client, "get_balance_cached", return_value=100.0))
             es.enter_context(mock.patch.object(low_post_probe, "resting_rows", return_value=[]))
