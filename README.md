@@ -86,10 +86,13 @@ the worst-5% station-day drawdown ~3× (−$1930→−$636) and lifts per-stn-da
 greedy first-qualify) is required — committing the *worst* leg collapses Sharpe to 0.022.
 Rollback → `False` reverts to the legacy per-(station,series,dir,day) cap. LOW unaffected.
 
-### Sizing
-HIGH base `PUSH_HIGH_MAX_BET_DEFAULT=$5` (NO), `PUSH_HIGH_YES_MAX_BET_USD=$5`;
-LOW `max_bet_low_series_usd=$1`; `min_buy_usd=0.40`; MAE-confidence shrink + edge-band
-tilt applied; `qty = budget // price`.
+### Sizing  (2026-06-06, Chris)
+HIGH base `PUSH_HIGH_MAX_BET_DEFAULT=$8` (NO/default — raised 5→8, now tail-protected by
+the one-bracket-per-station cap), `PUSH_HIGH_YES_MAX_BET_USD=$5` (YES held at $5 — thinner,
+walks thin books); LOW `max_bet_low_series_usd=$5` (raised 1→5; edge +7.22c/ct 14mo,
+live-confirmed @85% fill) with `PUSH_LOW_NO_BET_BY_STATION={"KDEN":10}` (the one robust
+both-halves LOW-NO cell); `min_buy_usd=0.40`; backstop `max_bet_high_series_usd=$20`;
+MAE-confidence shrink + edge-band tilt applied; `qty = budget // price`.
 
 ---
 
