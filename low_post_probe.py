@@ -254,6 +254,11 @@ def place(rt, cand, packet: dict, entry_dec, side: str,
         "obs_anchor_valid": entry_dec.obs_anchor_valid,
         "obs_anchor_reason": entry_dec.obs_anchor_reason,
         "model_prob": round(model_prob, 3) if model_prob is not None else None,
+        # 2026-06-06: stamp the forecast method (blend_KXLOW etc.) so LOW maker
+        # fills carry mu_method like the HIGH taker path — otherwise LOW entries
+        # land in trades.jsonl with mu_method=None and are invisible to any
+        # blend-filtered analysis (the bug that hid 9 June-5 LOW fills).
+        "mu_method": packet.get("mu_method"),
     }
     row = {
         "order_id": order_id, "ticker": cand.ticker, "side": side,
@@ -308,6 +313,7 @@ def _adopt(rt, row: dict, filled: int, realized_price_dollars: float,
         "opened_by": "paper-judge", "series": ctx["series_prefix"],
         "bracket_kind": ctx["bracket_kind"], "market_price_c": realized_c,
         "model_prob": ctx.get("model_prob"), "gap_pp": None,
+        "mu_method": ctx.get("mu_method"),
         "judge": {
             "conviction": ctx["conviction"], "size_factor": ctx["size_factor"],
             "read": ctx["read"], "key_risks": ctx["key_risks"],

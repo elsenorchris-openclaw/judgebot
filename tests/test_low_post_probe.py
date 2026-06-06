@@ -42,7 +42,8 @@ def _row(ticker="KXLOWTMIA-26MAY24-B78.5", side="no", climate_day="2099-01-01",
             "series_prefix": "KXLOW", "bracket_kind": "B", "climate_day": climate_day,
             "action": "BUY_NO", "read": "r", "conviction": 0.85, "size_factor": 1.0,
             "key_risks": [], "what_would_change_my_mind": "", "obs_anchor": "",
-            "obs_anchor_valid": False, "obs_anchor_reason": "", "model_prob": 0.86},
+            "obs_anchor_valid": False, "obs_anchor_reason": "", "model_prob": 0.86,
+            "mu_method": "blend_KXLOW"},
     }
 
 
@@ -135,6 +136,9 @@ class SweepTest(_RegTmp):
             self.assertEqual(rec["entry_price"], 0.53)
             self.assertEqual(rec["market_price_c"], 53)
             self.assertEqual(rec["judge"]["cross_c"], 66)
+            # 2026-06-06: LOW maker fills must carry mu_method (blend_KXLOW) so they
+            # aren't invisible to blend-filtered analysis like the June-5 LOW fills were.
+            self.assertEqual(rec["mu_method"], "blend_KXLOW")
             st.upsert_entry.assert_called_once()
             gr.record_buy.assert_called_once()
         self.assertEqual(lpp._load(), [])  # dropped from registry
