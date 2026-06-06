@@ -69,6 +69,11 @@ class TestLowPostRestingCap(unittest.TestCase):
             es.enter_context(mock.patch.object(config, "AUTO_EXECUTE_BUY_YES_PUSH", True))
             es.enter_context(mock.patch.object(config, "AUTO_EXECUTE_BUY_NO_PUSH", True))
             es.enter_context(mock.patch.object(config, "PUSH_LOW_POST_AT_MID", True))
+            # 2026-06-06: these tests validate the resting-order CAP using LOW YES as the
+            # example. The live LOW=B-NO-only gate (PUSH_LOW_B_NO_ONLY) would intercept LOW
+            # YES first; turn it OFF here so the cap mechanism is tested in isolation. The
+            # gate itself is covered by test_blend_gate_changes.TestLowBNoOnly.
+            es.enter_context(mock.patch.object(config, "PUSH_LOW_B_NO_ONLY", False))
             es.enter_context(mock.patch.object(
                 config, "PUSH_MAX_TICKERS_PER_STATION_SIDE_DIRECTION", 1))
             es.enter_context(mock.patch.object(
@@ -137,6 +142,7 @@ class TestLowPostRestingCap(unittest.TestCase):
             es.enter_context(mock.patch.object(config, "AUTO_EXEC_LOW_ENABLED", True))
             es.enter_context(mock.patch.object(config, "AUTO_EXECUTE_BUY_YES_PUSH", True))
             es.enter_context(mock.patch.object(config, "PUSH_LOW_POST_AT_MID", True))
+            es.enter_context(mock.patch.object(config, "PUSH_LOW_B_NO_ONLY", False))  # 2026-06-06: isolate cap from the B-NO-only gate (LOW YES example)
             es.enter_context(mock.patch.object(
                 config, "PUSH_MAX_TICKERS_PER_STATION_SIDE_DIRECTION", 1))
             es.enter_context(mock.patch.object(

@@ -1580,13 +1580,30 @@ def _try_auto_execute(cand, packet: dict, decision: dict,
             else:
                 return False, f"blend_only: mu_method={_mm or 'none'} (matcher fallback not executed)"
     short_dir = "NO" if direction == "BUY_NO" else "YES"
+    # (Gate 1.5) LOW = B-NO ONLY. 2026-06-06 backtest (low_tight.py, 2mo / 943 trades /
+    # 20 stations): B-NO is the ONLY +EV LOW cell (+2.8-3.3c/ct at >=8pp edge, both
+    # halves +, leave-one-station-out +2.0..+4.8c, reconstructed mu MAE 1.66F < market
+    # 1.98F). B-YES (-2.7c), T-NO (-5.4c), T-YES (-5.7c) are ALL robustly -EV both halves.
+    # Mechanism: the blend rules OUT brackets well (NO wins ~71%) but can't pinpoint the
+    # winning 2F bin (YES wins ~24%); T-tails are noise. Drop LOW YES + all LOW T-tails.
+    # Flag-gated (PUSH_LOW_B_NO_ONLY); HIGH unaffected. Rollback: flag=False.
+    if cand.series_prefix == "KXLOW" and getattr(_cfg, "PUSH_LOW_B_NO_ONLY", False):
+        if direction == "BUY_YES":
+            return False, "low_b_no_only: LOW YES dropped (-2.7c/ct backtest)"
+        if cand.bracket_kind != "B":
+            return False, f"low_b_no_only: LOW T-tail dropped ({cand.bracket_kind}, -5c/ct)"
     # (Gate 2) Edge floor — bot only fires above PUSH_MIN_EDGE_PP. The
     # nn_shadow_strategy.pure_nn_decide internal floor stays at 6pp so the
     # shadow log keeps logging marginal-edge candidates for diagnostics.
     min_edge_pp = int(getattr(_cfg, "PUSH_MIN_EDGE_PP", 12))
     # 2026-05-28 (Chris): side-specific YES edge floor. NO floor unchanged;
     # 12-18pp YES is +EV on pooled real fills (n=12, 67%WR, +17.9c/ct). Tail-bet gate still stacks.
-    if direction == "BUY_YES":
+    # 2026-06-06 (Chris): LOW needs a MUCH higher edge bar than HIGH. Backtest: at HIGH's
+    # 2pp bar EVERY LOW cell is -EV incl B-NO (-0.4c); B-NO turns +EV both-halves only at
+    # >=8pp (low_tight.py edge sweep). LOW is B-NO-only (gate above) so this is its bar.
+    if cand.series_prefix == "KXLOW":
+        min_edge_pp = int(getattr(_cfg, "PUSH_MIN_EDGE_PP_LOW", min_edge_pp))
+    elif direction == "BUY_YES":
         min_edge_pp = int(getattr(_cfg, "PUSH_MIN_EDGE_PP_YES", min_edge_pp))
     edge_val = decision.get("edge")
     if edge_val is None:

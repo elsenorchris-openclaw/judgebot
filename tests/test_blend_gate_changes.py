@@ -281,5 +281,63 @@ class TestHighMakerRouting(_Base):
         place.assert_not_called()
 
 
+class TestLowBNoOnly(_Base):
+    """2026-06-06 (Chris): LOW = B-NO ONLY (PUSH_LOW_B_NO_ONLY). Backtest low_tight.py:
+    B-NO is the only +EV LOW cell; B-YES/T-NO/T-YES robustly -EV. Drop LOW YES + LOW
+    T-tails; keep LOW B-NO. HIGH unaffected. Pins the scoping so it can't widen silently."""
+    def _pkt(self, mu=60.0):
+        # cheap YES (NO favored) so a LOW B-NO is a clean high-mass bet, not a tail wager
+        return {"yes_bid_c": 9, "yes_ask_c": 10, "no_ask_c": 91,
+                "seconds_to_close": 10_000, "mu_chosen": mu, "sigma_chosen": 1.5,
+                "floor": 71.0, "cap": 72.0, "local_clock": {"h_to_peak": 2.0}}
+
+    def test_low_b_yes_blocked(self):
+        import config as _cfg
+        cand = _cand("KXLOWTMIA-26MAY20-B71.5", "KMIA", "KXLOW", kind="B", floor=71.0, cap=72.0, label=71.5)
+        with mock.patch.object(_cfg, "PUSH_LOW_B_NO_ONLY", True):
+            ok, reason = self._run(cand, self._pkt(71.5), _decision("BUY_YES"), series="LOW")
+        self.assertFalse(ok)
+        self.assertIn("low_b_no_only", reason)
+
+    def test_low_t_no_blocked(self):
+        import config as _cfg
+        cand = _cand("KXLOWTMIA-26MAY20-T70", "KMIA", "KXLOW", kind="T", floor=70.0, cap=70.0, label=70.0)
+        with mock.patch.object(_cfg, "PUSH_LOW_B_NO_ONLY", True):
+            ok, reason = self._run(cand, self._pkt(60.0), _decision("BUY_NO"), series="LOW")
+        self.assertFalse(ok)
+        self.assertIn("low_b_no_only", reason)
+
+    def test_low_b_no_passes_the_gate(self):
+        # B-NO is NOT blocked by this gate (may proceed to the maker path -> mock place).
+        import config as _cfg, low_post_probe
+        cand = _cand("KXLOWTMIA-26MAY20-B71.5", "KMIA", "KXLOW", kind="B", floor=71.0, cap=72.0, label=71.5)
+        with mock.patch.object(_cfg, "PUSH_LOW_B_NO_ONLY", True), \
+             mock.patch.object(_cfg, "PUSH_LOW_POST_AT_MID", True), \
+             mock.patch.object(_cfg, "AUTO_EXECUTE_BUY_NO_PUSH", True), \
+             mock.patch.object(low_post_probe, "has_resting", return_value=False), \
+             mock.patch.object(low_post_probe, "place", return_value=(True, "placed")):
+            ok, reason = self._run(cand, self._pkt(60.0), _decision("BUY_NO"), series="LOW")
+        self.assertNotIn("low_b_no_only", reason)
+
+    def test_high_yes_unaffected(self):
+        # The gate is KXLOW-scoped; a HIGH YES never trips it.
+        import config as _cfg
+        cand = _cand("KXHIGHMIA-26MAY20-B88.5", "KMIA", "KXHIGH", kind="B")
+        pkt = {"yes_bid_c": 48, "yes_ask_c": 50, "no_ask_c": 52, "seconds_to_close": 10_000,
+               "mu_chosen": 88.5, "sigma_chosen": 1.5, "floor": 88.0, "cap": 89.0,
+               "local_clock": {"h_to_peak": 2.0}}
+        with mock.patch.object(_cfg, "PUSH_LOW_B_NO_ONLY", True):
+            ok, reason = self._run(cand, pkt, _decision("BUY_YES"), series="HIGH")
+        self.assertNotIn("low_b_no_only", reason)
+
+    def test_gate_off_low_yes_allowed(self):
+        # Flag off -> LOW YES not blocked by this gate (rollback path stays covered).
+        import config as _cfg
+        cand = _cand("KXLOWTMIA-26MAY20-B71.5", "KMIA", "KXLOW", kind="B", floor=71.0, cap=72.0, label=71.5)
+        with mock.patch.object(_cfg, "PUSH_LOW_B_NO_ONLY", False):
+            ok, reason = self._run(cand, self._pkt(71.5), _decision("BUY_YES"), series="LOW")
+        self.assertNotIn("low_b_no_only", reason)
+
+
 if __name__ == "__main__":
     unittest.main()
