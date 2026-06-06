@@ -76,7 +76,20 @@ ENABLE_LLM_EXIT_LOOP: bool = False
 # recorded entry baseline (entry_bid_c) -- pre-existing open positions hold to
 # settlement as before. Rollback: ENABLE_ADVERSE_DRIFT_EXIT=False (and optionally
 # ENABLE_SELLS=False to fully re-disable selling).
-ENABLE_ADVERSE_DRIFT_EXIT: bool = True
+#
+# 2026-06-06 (Chris): DISABLED for the blend bot. Re-backtested on the blend era
+# (Jun3-5, n=14 fires, all blend_KXHIGH): exit -$19.89 vs holding to settlement
+# (7 cut real losers +$11.58, 7 sold EVENTUAL WINNERS -$31.47). The +$23.54 above
+# was the MATCHER's entry distribution; it does NOT transfer to the blend. Why:
+# the blend buys CHEAP LONGSHOTS (sigma-play), so a stop-loss is asymmetric against
+# us -- cutting a losing longshot salvages little (already cheap), cutting a winning
+# longshot gives up the full run to $1; and temp brackets whipsaw intraday (high not
+# locked till peak) so it fires on false-adverse signals. The blend's thesis (market
+# under-confident -> intraday adverse moves revert) IS hold-to-settlement. Max loss
+# is already capped by $5 sizing, so there's no catastrophic-collapse case to guard.
+# Re-enable only if a future entry distribution backtests positive. LOW was always
+# immune (no entry_bid_c baseline). cf session 2026-06-06 June-5 deep-dive.
+ENABLE_ADVERSE_DRIFT_EXIT: bool = False
 ADVERSE_DRIFT_EXIT_PP: int = 10        # held-side bid must fall this many cents
 ADVERSE_DRIFT_WINDOW_MIN: int = 60     # only watch the first 60 min after entry
 ADVERSE_DRIFT_SUSTAIN_MIN: int = 15    # breach must persist this long before exit
