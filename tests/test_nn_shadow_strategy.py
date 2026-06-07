@@ -317,5 +317,47 @@ class TestTailEmpiricalCorrection(unittest.TestCase):
         self.assertAlmostEqual(off["p_yes"], on["p_yes"], places=9)
 
 
+def _tier_mult(edge_pp, tier):
+    lo_t, hi_t, lo_m, mid_m, hi_m = tier
+    return lo_m if edge_pp < lo_t else (mid_m if edge_pp < hi_t else hi_m)
+
+
+class TestEdgeTierSizing(unittest.TestCase):
+    """2026-06-07 (Chris): edge-tier HIGH sizing -- scale the cap by the bet's edge so
+    higher-edge bets (higher EV/contract) get more size. Exposure-neutral; HIGH only.
+    pins: mult tracks the band, size scales with it, None=flat, LOW unaffected, edge_max=1.0."""
+    LIVE = (10.0, 18.0, 0.55, 0.85, 1.25)
+
+    def test_band_selection_across_thresholds(self):
+        # same ~30pp HIGH edge; move the thresholds so it lands in each band.
+        for tier in [(10, 18, 0.55, 0.85, 1.25),   # >=18 -> hi (1.25)
+                     (25, 50, 0.55, 0.85, 1.25),   # [25,50) -> mid (0.85)
+                     (50, 60, 0.55, 0.85, 1.25)]:  # <50 -> lo (0.55)
+            d = nss.pure_nn_decide(_pkt(mu_method="blend_KXHIGH"),
+                                   edge_max=1.0, series_cap_high_usd=8.0, edge_tier=tier)
+            self.assertEqual(d["decision"], "BUY_NO")
+            epp = d["edge"] * 100.0
+            self.assertEqual(d["edge_tier_mult"], _tier_mult(epp, tier))
+
+    def test_hi_edge_sizes_up_vs_flat(self):
+        # ample ticker headroom so the $8 series cap (x1.25 -> $10) is the binding limit.
+        flat = nss.pure_nn_decide(_pkt(mu_method="blend_KXHIGH"), edge_max=1.0,
+                                  series_cap_high_usd=8.0, ticker_remaining_usd=20.0, edge_tier=None)
+        tier = nss.pure_nn_decide(_pkt(mu_method="blend_KXHIGH"), edge_max=1.0,
+                                  series_cap_high_usd=8.0, ticker_remaining_usd=20.0, edge_tier=self.LIVE)
+        self.assertEqual(flat["edge_tier_mult"], 1.0)          # disabled = flat
+        self.assertEqual(tier["edge_tier_mult"], 1.25)         # ~30pp edge -> hi band
+        self.assertGreater(tier["size_usd"], flat["size_usd"])  # 1.25x cap -> bigger bet
+        self.assertGreater(tier["size_usd"], 8.0)              # actually exceeds the $8 flat cap
+
+    def test_low_series_unaffected(self):
+        # LOW packet: is_high False -> edge_tier is ignored (mult stays 1.0).
+        d = nss.pure_nn_decide(
+            _pkt(ticker="KXLOWTATL-26MAY18-B70.5", series="KXLOW", floor=70, cap=71,
+                 mu_method="blend_KXLOW", mu_chosen=65.0, running_min_or_max=66.0),
+            edge_max=1.0, series_cap_low_usd=1.0, edge_tier=self.LIVE)
+        self.assertEqual(d.get("edge_tier_mult", 1.0), 1.0)
+
+
 if __name__ == "__main__":
     unittest.main()

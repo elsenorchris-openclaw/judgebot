@@ -2597,6 +2597,9 @@ def _evaluate_ticker(ticker: str, trigger: str) -> None:
             series_cap_high_usd=_high_cap,
             series_cap_low_usd=float(_gr.get("max_bet_low_series_usd", 5.0)),
             use_tail_empirical=getattr(_cfg, "USE_TAIL_EMPIRICAL_PYES", False),
+            edge_tier=(tuple(getattr(_cfg, "PUSH_EDGE_TIER_SIZING"))
+                       if getattr(_cfg, "PUSH_EDGE_TIER_SIZING_ENABLED", False)
+                       else None),
         )
 
         # 2026-05-22 (Chris): scale the proven NYC/MIA BUY_NO edge up to its

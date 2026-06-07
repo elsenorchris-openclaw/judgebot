@@ -252,8 +252,15 @@ def pure_nn_decide(
     min_buy_usd: float = 1.0,
     ticker_remaining_usd: float = 5.0,
     use_tail_empirical: bool = False,
+    edge_tier: tuple | None = None,
 ) -> dict[str, Any]:
-    """Decide what pure-nn would do on this packet. See module docstring."""
+    """Decide what pure-nn would do on this packet. See module docstring.
+
+    edge_tier (HIGH only): (lo_pp, hi_pp, lo_mult, mid_mult, hi_mult) scales the size
+    cap by the bet's edge -- higher-edge bets have higher EV/contract so concentrate size
+    on them. Exposure-NEUTRAL multipliers (avg ~1.0) -> same total risk, +11% total $ /
+    Sharpe up (high_sizing.py, 19mo). None = flat (default; keeps the local sims flat).
+    """
     out: dict[str, Any] = {
         "decision": "SKIP", "side": None, "edge": None, "p_yes": None,
         "qty": None, "price_c": None, "size_usd": None,
@@ -391,6 +398,21 @@ def pure_nn_decide(
 
     # Sizing
     series_cap = series_cap_high_usd if is_high else series_cap_low_usd
+    # 2026-06-07 (Chris): edge-tier sizing (HIGH only). Flat sizing leaves ~11% on the
+    # table; higher-edge bets have higher EV/contract, so concentrate size on them. The
+    # multipliers are exposure-NEUTRAL (avg ~1.0 over the edge dist) -> same total risk,
+    # +11% total $ / Sharpe 0.293->0.304 both-halves (high_sizing.py, 19mo). LOW unaffected.
+    edge_tier_mult = 1.0
+    if is_high and edge_tier:
+        _lo_pp, _hi_pp, _lo_m, _mid_m, _hi_m = edge_tier
+        _epp = edge * 100.0
+        edge_tier_mult = _lo_m if _epp < _lo_pp else (_mid_m if _epp < _hi_pp else _hi_m)
+        series_cap = series_cap * edge_tier_mult
+        # scale the per-ticker headroom too, else it (==cap for a fresh ticker) clamps the
+        # up-tier back to the unscaled cap. Safe: the blend buys each bracket once (one-
+        # bracket-per-station + position cap), so this never over-fills a held ticker.
+        ticker_remaining_usd = ticker_remaining_usd * edge_tier_mult
+    out["edge_tier_mult"] = round(edge_tier_mult, 3)
     qty, cost = _compute_size(
         packet, side, ask_c,
         series_cap_usd=series_cap,
