@@ -925,14 +925,9 @@ PUSH_MAX_SPREAD_C_LOW: float = 25.0        # 2026-06-03 (Chris): 1->25, matching
 # Distinct from the REVERTED p_yes median-bias correction: this only SKIPS a bet
 # (never shifts p_yes / flips a side), so it cannot turn a winner into a loser.
 # Set PUSH_SKIP_NO_MU_NEAR_BRACKET=False to revert.
-PUSH_SKIP_NO_MU_NEAR_BRACKET: bool = False  # 2026-06-02 (Chris): DISABLED — $1 LIVE EXPERIMENT. "Don't short a B-bracket your own mu points into." Mechanism is sound BUT its CLI-offset (PUSH_NO_MU_CLI_OFFSET_*) is MATCHER-era (obs->CLI correction); the blend predicts CLI directly so the offset should be ~0, and the blend's calibrated sigma can make in-bracket NO +EV when the bracket holds <50% mass. Sim says removing it adds +12.4c/ct. Testing at $1. WATCH the feed; re-enable ->True if in-bracket NO shorts bleed. cf project_blend_edge_FOUND 6/2.
-PUSH_NO_MU_CLI_OFFSET_DEFAULT: float = 0.5
-PUSH_NO_MU_CLI_OFFSET_BY_STATION: dict = {
-    "KATL": 0.1, "KAUS": 0.3, "KBOS": 0.9, "KDEN": 0.3, "KDFW": 0.0,
-    "KHOU": 0.7, "KLAS": 0.6, "KLAX": -0.1, "KMDW": 0.2, "KMIA": 0.9,
-    "KMSP": 0.8, "KMSY": 0.6, "KNYC": 0.4, "KOKC": 0.5, "KPHL": 0.4,
-    "KPHX": 0.5, "KSAT": -0.3, "KSEA": 0.3, "KSFO": 0.4,
-}
+PUSH_SKIP_NO_MU_NEAR_BRACKET: bool = True  # 2026-06-08 (Chris): RE-ENABLED for the blend at BLEND-NATIVE settings (offset 0 / band 0.5; per-station dicts cleared below). The 6/2 disable was CORRECT for the matcher-era settings (offset 0.5 / band 1.5): blend backtest (existing_gate_bt.py, 3148 station-days held-out, both halves) confirms band 1.5 costs ~$600 EV = the +12.4c/ct you found. BUT the culprit was the wide BAND, not the mechanism -- at offset 0 / band 0.5 the gate is +$271 EV (both halves +, H1 +109/H2 +162) AND worst-day -21% (Sharpe 0.688->0.822), removing only the net-NEGATIVE coin flips (mu essentially inside the bracket). offset 0 = your own "blend predicts CLI directly" point. Reuses this tested gate (no new code). Band 1.0 was flat-EV/-37%worst (Sharpe 0.844) but removes marginally +EV bets -- HELD per your EV-stance. Rollback ->False (or band 1.5/offset 0.5 to restore matcher-era). cf project_blend_edge_FOUND.
+PUSH_NO_MU_CLI_OFFSET_DEFAULT: float = 0.0  # 2026-06-08: 0.5->0.0 (blend predicts CLI directly; the matcher-era obs->CLI correction is no longer needed). Rollback ->0.5.
+PUSH_NO_MU_CLI_OFFSET_BY_STATION: dict = {}  # 2026-06-08: CLEARED -- was matcher-era per-station obs->CLI offsets; blend predicts CLI directly so uniform offset 0. Matcher values preserved in git history (pre-6/8). Rollback: restore the dict + DEFAULT 0.5.
 
 # 2026-05-26: Per-station BOUNDARY BAND for the thin-margin gate above. The
 # shipped gate used a fixed 0.5°F band -- skip when (mu - offset) lands in
@@ -945,14 +940,8 @@ PUSH_NO_MU_CLI_OFFSET_BY_STATION: dict = {
 # subsample stability (≥69% stable runs): stations where matcher is reliable
 # (KATL/KAUS/KDFW/KHOU/KSEA/KSFO) keep the narrow 0.5°F band; high-variance
 # coastal/transitional (KBOS/KLAX) get 2.0°F; rest use DEFAULT 1.5°F.
-PUSH_NO_MU_BOUNDARY_BAND_DEFAULT: float = 1.5
-PUSH_NO_MU_BOUNDARY_BAND_BY_STATION: dict = {
-    "KATL": 0.5, "KAUS": 0.5, "KDFW": 0.5, "KHOU": 0.5,
-    "KSEA": 0.5, "KSFO": 0.5,
-    "KBOS": 2.0, "KLAX": 2.0,
-    # All others use DEFAULT 1.5°F:
-    # KDCA, KDEN, KLAS, KMDW, KMIA, KMSP, KMSY, KNYC, KOKC, KPHL, KPHX, KSAT
-}
+PUSH_NO_MU_BOUNDARY_BAND_DEFAULT: float = 0.5  # 2026-06-08 (Chris): 1.5->0.5. Blend backtest (margin_sweep/existing_gate_bt, held-out, both halves): band 1.5 costs ~$600 EV; band 0.5 = +$271 EV (both halves +) + worst-day -21%, removing only net-neg coin flips. Rollback ->1.5.
+PUSH_NO_MU_BOUNDARY_BAND_BY_STATION: dict = {}  # 2026-06-08: CLEARED -- was matcher-era per-station bands (incl KBOS/KLAX=2.0, untested + too wide under the blend); the uniform 0.5 band is what was validated on the blend reconstruction. The comment block above is historical (pre-6/8). Rollback: restore the dict + DEFAULT 1.5.
 
 # 2026-05-26: HIGH BUY_NO σ floor -- skip the bet when matcher's sigma_chosen
 # is below this threshold (matcher overconfidence regime). 5/23-5/24 deep-dive:

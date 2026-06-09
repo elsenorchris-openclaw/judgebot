@@ -76,27 +76,30 @@ class TestThinMarginGate(unittest.TestCase):
             )
 
     def test_mu_inside_blocked(self):
-        """KMIA offset +0.9: mu=90.0 -> 89.1 inside [87.5,89.5] -> blocked."""
+        """2026-06-08 (band 0.5 / offset 0): mu=88.5 sits inside bracket [88,89]
+        -> within [87.5,89.5] -> blocked (shorting a bracket our mu points into)."""
         cand = _make_candidate("KXHIGHMIA-26MAY20-B88.5", "KMIA",
                                 "KXHIGH", "2026-05-20")
-        executed, reason = self._run(cand, _make_packet(90.0),
+        executed, reason = self._run(cand, _make_packet(88.5),
                                      _make_decision("BUY_NO"))
         self.assertFalse(executed)
         self.assertIn("thin_margin_no", reason)
 
     def test_mu_clear_allowed(self):
-        """KMIA offset +0.9: mu=92.0 -> 91.1 clear of [87.5,89.5] -> allowed."""
+        """band 0.5 / offset 0: mu=92.0 clear of [87.5,89.5] -> allowed."""
         cand = _make_candidate("KXHIGHMIA-26MAY20-B88.5", "KMIA",
                                 "KXHIGH", "2026-05-20")
         executed, reason = self._run(cand, _make_packet(92.0),
                                      _make_decision("BUY_NO"))
         self.assertNotIn("thin_margin_no", reason)
 
-    def test_default_offset_for_unlisted_station(self):
-        """Unlisted station (KDCA) uses DEFAULT +0.5: mu=89.8 -> 89.3 inside."""
+    def test_offset_zero_uniform(self):
+        """2026-06-08: offset is now 0 for ALL stations (matcher per-station
+        obs->CLI offsets cleared; blend predicts CLI directly). KDCA mu=89.4 ->
+        within [87.5,89.5] -> blocked (no per-station offset applied)."""
         cand = _make_candidate("KXHIGHDCA-26MAY20-B88.5", "KDCA",
                                 "KXHIGH", "2026-05-20")
-        executed, reason = self._run(cand, _make_packet(89.8),
+        executed, reason = self._run(cand, _make_packet(89.4),
                                      _make_decision("BUY_NO"))
         self.assertFalse(executed)
         self.assertIn("thin_margin_no", reason)
@@ -136,44 +139,39 @@ class TestThinMarginGate(unittest.TestCase):
                                      _make_decision("BUY_NO"), thin_margin=False)
         self.assertNotIn("thin_margin_no", reason)
 
-    def test_default_band_widened_to_1_5(self):
-        """2026-05-26: DEFAULT band widened from 0.5°F to 1.5°F. KDCA (no
-        override, uses DEFAULT 1.5°F): offset +0.5, bracket [88,89].
-        mu=87.0 -> adjusted 86.5. Inside [88-1.5, 89+1.5] = [86.5, 90.5] -> BLOCKED.
-        (Under old 0.5°F band [87.5,89.5], 86.5 would have been ALLOWED.)"""
+    def test_default_band_0_5(self):
+        """2026-06-08: band tightened 1.5°F -> 0.5°F (offset 0), per-station dicts
+        cleared. KDCA bracket [88,89], band [87.5,89.5]. mu=89.0 inside -> BLOCKED
+        with band=0.5 in the reason."""
         cand = _make_candidate("KXHIGHDCA-26MAY26-B88.5", "KDCA",
                                 "KXHIGH", "2026-05-26")
-        executed, reason = self._run(cand, _make_packet(87.0),
+        executed, reason = self._run(cand, _make_packet(89.0),
                                      _make_decision("BUY_NO"))
         self.assertFalse(executed)
         self.assertIn("thin_margin_no", reason)
-        self.assertIn("band=1.5", reason)
+        self.assertIn("band=0.5", reason)
 
-    def test_narrow_band_station_unaffected(self):
-        """KAUS (override band=0.5°F): keeps old narrow behavior so we don't
-        over-filter at hot-inland stations where the matcher is accurate.
-        Offset KAUS = +0.3, bracket [88,89], mu=87.0 -> adjusted 86.7.
-        Band [88-0.5, 89+0.5] = [87.5, 89.5] -> 86.7 BELOW -> ALLOWED.
-        (Under DEFAULT 1.5°F band [86.5,90.5], 86.7 would be BLOCKED.)"""
-        cand = _make_candidate("KXHIGHAUS-26MAY26-B88.5", "KAUS",
+    def test_band_0_5_edge_allows(self):
+        """The 0.5°F tightening MATTERS at the edge: KDCA bracket [88,89], band
+        [87.5,89.5]. mu=87.0 is BELOW 87.5 -> ALLOWED. (Under the old 1.5°F band
+        [86.5,90.5] this same bet was BLOCKED -- the tightening recovers the +EV
+        tail bets while still cutting the in-bracket coin flips.)"""
+        cand = _make_candidate("KXHIGHDCA-26MAY26-B88.5", "KDCA",
                                 "KXHIGH", "2026-05-26")
         executed, reason = self._run(cand, _make_packet(87.0),
                                      _make_decision("BUY_NO"))
         self.assertNotIn("thin_margin_no", reason)
 
-    def test_wide_band_station_more_aggressive(self):
-        """KLAX (override band=2.0°F): catches boundary risk the DEFAULT 1.5°F
-        would miss at high-variance coastal stations. Offset KLAX = -0.1,
-        bracket [88,89], mu=86.2 -> adjusted 86.3. Under 2.0°F band
-        [86.0,91.0] -> 86.3 INSIDE -> BLOCKED.
-        (Under DEFAULT 1.5°F band [86.5,90.5], 86.3 BELOW -> would be ALLOWED.)"""
+    def test_cleared_per_station_overrides(self):
+        """2026-06-08: per-station offset+band dicts CLEARED -> every station uses
+        the uniform offset 0 / band 0.5. KLAX (formerly band=2.0F override) now
+        uses 0.5: mu=86.2, bracket [88,89], band [87.5,89.5] -> 86.2 BELOW ->
+        ALLOWED. (The old 2.0F override [86.0,91.0] would have BLOCKED it.)"""
         cand = _make_candidate("KXHIGHLAX-26MAY26-B88.5", "KLAX",
                                 "KXHIGH", "2026-05-26")
         executed, reason = self._run(cand, _make_packet(86.2),
                                      _make_decision("BUY_NO"))
-        self.assertFalse(executed)
-        self.assertIn("thin_margin_no", reason)
-        self.assertIn("band=2.0", reason)
+        self.assertNotIn("thin_margin_no", reason)
 
     def test_sigma_floor_blocks_low_sigma(self):
         """2026-05-26: σ_chosen < PUSH_HIGH_NO_MIN_SIGMA_F (default 1.0) -> SKIP.
