@@ -81,6 +81,8 @@ class TestPushTailBetGate(unittest.TestCase):
         self._orig_yes = getattr(config, "AUTO_EXECUTE_BUY_YES_PUSH", None)
         config.AUTO_EXECUTE_BUY_NO_PUSH = True
         config.AUTO_EXECUTE_BUY_YES_PUSH = True
+        self._orig_hno = getattr(config, "PUSH_HIGH_NO_ONLY", None)
+        config.PUSH_HIGH_NO_ONLY = False  # 2026-06-09: NO-only would block the YES tail-bet test; pin off
 
     def tearDown(self):
         nsw._rt = self._orig_rt
@@ -93,6 +95,8 @@ class TestPushTailBetGate(unittest.TestCase):
             config.AUTO_EXECUTE_BUY_NO_PUSH = self._orig_no
         if self._orig_yes is not None:
             config.AUTO_EXECUTE_BUY_YES_PUSH = self._orig_yes
+        if self._orig_hno is not None:
+            config.PUSH_HIGH_NO_ONLY = self._orig_hno
 
     def _run(self, packet, decision, series="HIGH", local_hour=12.0):
         import paper_judge_bot as pjb

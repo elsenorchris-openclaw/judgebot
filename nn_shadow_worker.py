@@ -1592,6 +1592,17 @@ def _try_auto_execute(cand, packet: dict, decision: dict,
             return False, "low_b_no_only: LOW YES dropped (-2.7c/ct backtest)"
         if cand.bracket_kind != "B":
             return False, f"low_b_no_only: LOW T-tail dropped ({cand.bracket_kind}, -5c/ct)"
+    # 2026-06-09 (Claude, Chris-approved): SUMMER HIGH NO-only. Mirror of the LOW
+    # B-NO-only gate above, for the middle-path size-up to $3: concentrate the larger
+    # size on the tail-robust NO side. Audit (frozen prod model, 427 summer recon days):
+    # NO-only >=10pp = +9.4c/ct/66%WR, both halves +, LOSO all 7 folds +, robust to a
+    # blowup-day rate up to ~37%; live ex-6/4 +11.4c/ct. YES is marginally +EV in recon
+    # (+9.5c/ct) but is the forecast-miss-day tail amplifier live (6/4: YES -24c/ct vs
+    # NO -7.7) -> dropped at 3x size. Keeps HIGH NO on BOTH B and T (high-edge T-tail NO
+    # is fine). Flag-gated; rollback ->False (restore YES) in fall with the seasonal swap.
+    if cand.series_prefix == "KXHIGH" and getattr(_cfg, "PUSH_HIGH_NO_ONLY", False):
+        if direction == "BUY_YES":
+            return False, "high_no_only: HIGH YES dropped (summer size-up, NO-only core)"
     # (Gate 2) Edge floor — bot only fires above PUSH_MIN_EDGE_PP. The
     # nn_shadow_strategy.pure_nn_decide internal floor stays at 6pp so the
     # shadow log keeps logging marginal-edge candidates for diagnostics.

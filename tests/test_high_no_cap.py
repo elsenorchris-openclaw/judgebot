@@ -82,6 +82,7 @@ class _CapBase(unittest.TestCase):
             # bracket/station across both directions and is covered by
             # test_one_bracket_per_station.py — pin it OFF here to test the legacy path.
             P("PUSH_ONE_BRACKET_PER_STATION_HIGH", False)
+            P("PUSH_HIGH_NO_ONLY", False)  # 2026-06-09: NO-only would block these YES-cap cases; pin off to test the cap mechanism
             P("PUSH_MAE_GATE_ENABLED", False)
             P("USE_MU_AGREEMENT_GATE", False)
             P("PUSH_HIGH_SKIP_IF_OFF_PEAK_F", 0.0)

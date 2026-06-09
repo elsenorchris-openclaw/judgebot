@@ -70,6 +70,7 @@ class TestHighOffPeakGate(unittest.TestCase):
              mock.patch.object(kalshi_client, "get_balance_cached", return_value=100.0), \
              mock.patch.object(_cfg, "PUSH_MAE_GATE_ENABLED", False), \
              mock.patch.object(_cfg, "USE_MU_AGREEMENT_GATE", False), \
+             mock.patch.object(_cfg, "PUSH_HIGH_NO_ONLY", False), \
              mock.patch.object(_cfg, "PUSH_HIGH_SKIP_IF_OFF_PEAK_F", off_peak_f), \
              mock.patch.object(_cfg, "PUSH_HIGH_OFF_PEAK_MAX_H2PK", max_h2pk):
             return nsw._try_auto_execute(
