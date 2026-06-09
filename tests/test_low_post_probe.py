@@ -192,5 +192,38 @@ class SweepTest(_RegTmp):
         self.assertEqual(len(rows), 1)  # still resting
 
 
+class LowEdgeTierTest(_RegTmp):
+    """2026-06-09: edge-tier the LOW B-NO size in place() -- bigger on higher-edge
+    contested NOs (the LOW analog of the HIGH edge-tier). Mults [<12pp 0.7, 12-18pp 1.0,
+    >=18pp 1.3] on the $3 cap; at post_c=53 -> 3ct / 5ct / 7ct."""
+    def _cnt_for(self, edge, enabled=True):
+        import config
+        pkt = {"no_bid_c": 40, "no_ask_c": 66, "seconds_to_close": 9999}
+        with mock.patch.dict(config.GUARDRAILS, {"max_bet_low_series_usd": 3.0}), \
+             mock.patch.object(config, "PUSH_EDGE_TIER_SIZING_LOW_ENABLED", enabled), \
+             mock.patch.object(config, "PUSH_EDGE_TIER_SIZING_LOW", (12.0, 18.0, 0.7, 1.0, 1.3)), \
+             mock.patch.object(lpp, "kalshi_client") as kc, \
+             mock.patch.object(lpp, "guardrails") as gr, \
+             mock.patch.object(lpp, "state"), mock.patch.object(lpp, "_discord"):
+            kc.get_balance_cached.return_value = 1000.0
+            kc.place_buy.return_value = {"ok": True, "order_id": "OID", "filled": 0, "status": "resting"}
+            gr.check_buy.return_value = (True, "ok"); gr.BuyDecision = mock.Mock()
+            ok, _ = lpp.place(_rt(), _cand(), pkt, _entry_dec(), "no", {"p_yes": 0.30, "edge": edge})
+            self.assertTrue(ok)
+            return kc.place_buy.call_args[0][2]   # cnt
+
+    def test_hi_edge_sizes_up(self):
+        # >=18pp -> 1.3x ($3.90 -> 7ct) > <12pp -> 0.7x ($2.10 -> 3ct)
+        self.assertEqual(self._cnt_for(0.20), 7)
+        self.assertEqual(self._cnt_for(0.10), 3)
+        self.assertGreater(self._cnt_for(0.20), self._cnt_for(0.10))
+
+    def test_mid_edge_is_base(self):
+        self.assertEqual(self._cnt_for(0.15), 5)   # 12-18pp -> 1.0x ($3 -> 5ct)
+
+    def test_flag_off_is_flat(self):
+        self.assertEqual(self._cnt_for(0.20, enabled=False), 5)  # no tier -> base $3 -> 5ct
+
+
 if __name__ == "__main__":
     unittest.main()

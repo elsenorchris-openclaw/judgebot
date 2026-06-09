@@ -191,6 +191,20 @@ def place(rt, cand, packet: dict, entry_dec, side: str,
         if side == "no" and getattr(cand, "bracket_kind", "") == "B":
             side_cap = float(getattr(config, "PUSH_LOW_NO_BET_BY_STATION", {}).get(
                 cand.station, base_low_cap))
+            # 2026-06-09 (Chris): edge-tier the LOW B-NO size (the LOW analog of the HIGH
+            # edge-tier). Re-optimized on 6mo (Dec-May, low_optimize.py): B-NO EV is monotonic
+            # in edge (8pp +6.2c, 10pp +8.3c, 15pp +13.5c spring) and concentrates in the cheap,
+            # high-edge contested NOs. EXPOSURE-NEUTRAL mults [<12pp x0.7, 12-18pp x1.0, >=18pp
+            # x1.3] -> concentrate the $3 where the edge is (avg ~$3). Flag-gated; B-NO only
+            # (LOW is already B-NO-only via PUSH_LOW_B_NO_ONLY). The side_cap>base guardrail
+            # override below handles the up-tier; <base just bets smaller (under the cap).
+            if getattr(config, "PUSH_EDGE_TIER_SIZING_LOW_ENABLED", False):
+                _edge = (decision or {}).get("edge")
+                if _edge:
+                    _t = getattr(config, "PUSH_EDGE_TIER_SIZING_LOW", (12.0, 18.0, 0.7, 1.0, 1.3))
+                    _epp = float(_edge) * 100.0
+                    _m = _t[2] if _epp < _t[0] else (_t[3] if _epp < _t[1] else _t[4])
+                    side_cap = side_cap * _m
     else:
         # 2026-06-03 (Chris): HIGH maker-first. Honor the worker's already-sized target
         # (packet.push_target_usd = decision.size_usd -- carries the per-station cap,
