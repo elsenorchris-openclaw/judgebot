@@ -66,7 +66,8 @@ blend is on, `BLEND_DEEP_WINDOW_HOURS` overrides to the deep window
 (HIGH `(4.0, 2.5)` → peak−4..−2.5h; LOW `(3.0, 1.5)` → min−3..−1.5h).
 
 ### Gate stack (`_try_auto_execute`, in order; current live values)
-edge floor (NO `PUSH_MIN_EDGE_PP=2` / YES `=2`) · in-bracket tail-bet gate (`=25`)
+> **2026-06-09 SUMMER middle-path (Claude, Chris-approved, commits 4d05e18+c376448):** HIGH = **NO-only** (`PUSH_HIGH_NO_ONLY=True` drops HIGH YES — new gate below) at `PUSH_MIN_EDGE_PP=10` and **`$3`** (`PUSH_HIGH_MAX_BET_DEFAULT`); thin-margin-NO is **ON** (band 0.5/offset 0). Audit: NO-only ≥10pp = +9.4c/ct/66%WR on 427 summer recon days (both halves +, LOSO all 7 +, robust to ~37% blowup rate). LOW = $3 B-NO-only edge-tiered. ⚠️ The `=2` / `$8` / `thin-margin off` / `LOW $5` values in the prose below are the STALE pre-seasonal-swap (≤6/6) baseline — restore in fall ~Sep. cf `memory/project_blend_high_middlepath_shipped_20260609`.
+edge floor (NO `PUSH_MIN_EDGE_PP=2` / YES `=2`) · in-bracket tail-bet gate (`=25`) · **HIGH no-only** (`PUSH_HIGH_NO_ONLY`, summer)
 · direction/series toggles · per-station bench (empty) · NWP-agreement gate (off)
 · cell-MAE gate (off) · **decision window** · HIGH spread ≤25c / **LOW spread ≤1c**
 · thin-margin-NO (off) · NBM-veto (off) · σ-floor (1.0, per-station floors exempt
