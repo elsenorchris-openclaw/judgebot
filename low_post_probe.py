@@ -273,6 +273,15 @@ def place(rt, cand, packet: dict, entry_dec, side: str,
         # land in trades.jsonl with mu_method=None and are invisible to any
         # blend-filtered analysis (the bug that hid 9 June-5 LOW fills).
         "mu_method": packet.get("mu_method"),
+        # 2026-06-09: also carry mu/sigma/edge so LOW maker fills are analyzable
+        # like the HIGH taker path. gap_pp was hardcoded None in _adopt and mu/sigma
+        # were never recorded -> LOW trades landed in trades.jsonl with mu_chosen=None
+        # /gap_pp=0, invisible to blend WR/edge/MAE analysis (the $3 summer LOW bet
+        # we most need to monitor). decision.edge is in prob units -> pp.
+        "mu_chosen": packet.get("mu_chosen"),
+        "sigma_chosen": packet.get("sigma_chosen"),
+        "gap_pp": (round(float((decision or {}).get("edge")) * 100.0, 2)
+                   if (decision or {}).get("edge") is not None else None),
     }
     row = {
         "order_id": order_id, "ticker": cand.ticker, "side": side,
@@ -326,7 +335,8 @@ def _adopt(rt, row: dict, filled: int, realized_price_dollars: float,
         "label": ctx["city_code"], "floor": ctx["floor"], "cap": ctx["cap"],
         "opened_by": "paper-judge", "series": ctx["series_prefix"],
         "bracket_kind": ctx["bracket_kind"], "market_price_c": realized_c,
-        "model_prob": ctx.get("model_prob"), "gap_pp": None,
+        "model_prob": ctx.get("model_prob"), "gap_pp": ctx.get("gap_pp"),
+        "mu_chosen": ctx.get("mu_chosen"), "sigma_chosen": ctx.get("sigma_chosen"),
         "mu_method": ctx.get("mu_method"),
         "judge": {
             "conviction": ctx["conviction"], "size_factor": ctx["size_factor"],
