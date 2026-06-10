@@ -882,7 +882,7 @@ PUSH_MIN_EDGE_PP_LOW: int = 8  # 2026-06-06 (Chris): LOW-specific edge floor (HI
 # PUSH_MAX_ENTRY_C=90 (locklag ceil90: the last nickels don't cover obs-glitch
 # downside). Rollback -> False restores the legacy blend path exactly (which
 # stays parked at $1/$1 + NO-only + tiers off per the 6/9 halt protocol).
-PUSH_IRREV_LOCK_ONLY: bool = True
+PUSH_IRREV_LOCK_ONLY: bool = False  # 2026-06-10 (Chris): REJECTED for this bot ~30min after ship -- "we already have a locklag bot, this bot should trade with market blend strategy." Owner call: locklag owns the lock-lag mechanism; blendbot trades the BLEND (live at $1/$1, HIGH NO-only >=10pp / LOW B-NO-only >=8pp maker). Code + tests retained flag-off (16 tests in test_irrev_lock_only.py, conftest suite-default-off); do NOT re-enable here without Chris -- if the lock-NO surface is ever wanted, it belongs in locklag.
 PUSH_IRREV_LOCK_BUFFER_F: float = 1.0   # rm must clear the bracket edge by this many F (raise to tighten)
 PUSH_IRREV_LOCK_MIN_ENTRY_C: int = 50   # locked-NO entry floor, cents (sub-50c = market says our obs is wrong)
 

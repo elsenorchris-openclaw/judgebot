@@ -10,16 +10,16 @@ Live bot on EC2 `54.225.174.220`, dir `~/paper_judge_bot`, systemd service
 (branch `main`). Trades daily HIGH/LOW temperature brackets on Kalshi
 (`KXHIGH*` / `KXLOW*`). Shares the **v1max Kalshi wallet** with `locklag_bot`.
 
-> 🔄 **2026-06-10: RESUMED in IRREVERSIBLE-LOCK-ONLY mode (`PUSH_IRREV_LOCK_ONLY=True`,
-> Chris directive: "make it trade with something new").** The bot **no longer trades
-> forecasts**. It trades exactly one mechanism — the locklag class, the only one with
-> live proof in this household: **BUY_NO at 50–90c when the validated running extreme
-> has IRREVERSIBLY killed the bracket** (HIGH `rm ≥ cap+1F` / LOW `rm ≤ floor−1F`;
-> reversible "peak/min is in" locks are NOT traded). μ/σ are irrelevant for these rows
-> (rm truncation forces P(NO)=1), so locked rows bypass the μ-quality gates (blend-only,
-> window, thin-margin, σ, front-wind, off-peak) and keep all market/exec gates. Sizes
-> $1/$1. This is a **$1 live test of a mechanism, not a validated edge** — judge it on
-> settled fills only.
+> 🔄 **2026-06-10: TRADING the market-BLEND strategy at $1/$1 (Chris).** Resumed from
+> the 6/9 halt at owner direction. Live config = the blend path in its tuned form:
+> **HIGH $1 NO-only ≥10pp** (deep window, taker, thin-margin band 0.5, 1-bracket/station)
+> · **LOW $1 B-NO-only ≥8pp** (maker-at-mid + taker-fallback) · edge tiers OFF · no sells.
+> ⛔ Sizing discipline: the blend is net-negative live to date (context below) — judge on
+> **settled fills only**, never re-size on a reconstruction/replay.
+>
+> (The 6/10 IRREVERSIBLE-LOCK-ONLY mode shipped earlier tonight was **REJECTED by Chris
+> ~30min later** — "we already have a locklag bot." `PUSH_IRREV_LOCK_ONLY=False`; code +
+> 16 tests retained flag-off; the lock-NO surface belongs to locklag if ever wanted.)
 >
 > 🛑 Context — why the forecast path is off: blend era 6/2–6/9 = **−$156 net** (settled +
 > 6/9 book-resolved), **every cell live-negative**: HIGH NO −3.1c/ct (n=115) · HIGH YES
