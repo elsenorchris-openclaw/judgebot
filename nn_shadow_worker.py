@@ -1675,6 +1675,22 @@ def _try_auto_execute(cand, packet: dict, decision: dict,
             return False, "low_b_no_only: LOW YES dropped (-2.7c/ct backtest)"
         if cand.bracket_kind != "B":
             return False, f"low_b_no_only: LOW T-tail dropped ({cand.bracket_kind}, -5c/ct)"
+    # (Gate 1.6) LOW P(NO) floor (2026-06-10 LOW deep-dive). A cheap ask can
+    # manufacture "edge" while the model itself is ~coinflip (DAL 6/10: P(NO)=0.52
+    # at 28c = 23.6pp "edge", lost -- the recurring LOW loss shape). Require the
+    # model to actually lean NO before shorting a bracket. Stream-swept on 4452
+    # blend-era B-NO decision rows: P(NO)>=0.55 flips the kept book +1.4 ->
+    # +9.4c/ct; the losing thesis classes (cheap falls-past / post-min) sit below
+    # it. LOW BUY_NO only; PUSH_LOW_MIN_PNO=0 disables.
+    if cand.series_prefix == "KXLOW" and direction == "BUY_NO":
+        _pno_min = float(getattr(_cfg, "PUSH_LOW_MIN_PNO", 0.0))
+        _py_f = decision.get("p_yes")
+        if _pno_min > 0 and _py_f is not None:
+            try:
+                if (1.0 - float(_py_f)) < _pno_min:
+                    return False, f"low_pno_floor P(NO)={1.0-float(_py_f):.2f}<{_pno_min:.2f}"
+            except (TypeError, ValueError):
+                pass
     # 2026-06-09 (Claude, Chris-approved): SUMMER HIGH NO-only. Mirror of the LOW
     # B-NO-only gate above, for the middle-path size-up to $3: concentrate the larger
     # size on the tail-robust NO side. Audit (frozen prod model, 427 summer recon days):
