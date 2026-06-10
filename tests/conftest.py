@@ -58,6 +58,21 @@ def _disable_irrev_lock_only_for_gate_tests():
 
 
 @pytest.fixture(autouse=True)
+def _disable_wont_reach_gate_for_gate_tests():
+    """2026-06-10: the HIGH won't-reach NO veto (mu < floor-0.5) blocks the
+    mu-below-bracket packets many legacy gate tests use to exercise OTHER
+    gates. Same pattern as BLEND_ONLY_EXECUTION above: default OFF for the
+    suite; test_wont_reach_gate re-enables it explicitly."""
+    try:
+        import config
+    except Exception:
+        yield
+        return
+    with mock.patch.object(config, "PUSH_HIGH_NO_SKIP_WONT_REACH", False):
+        yield
+
+
+@pytest.fixture(autouse=True)
 def _disable_climate_day_guard_for_suite():
     """2026-06-04: _in_decision_window refuses brackets whose climate_day != the
     station's current wall-clock date. The window/clock gate tests pass FIXED past

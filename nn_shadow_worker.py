@@ -1893,6 +1893,28 @@ def _try_auto_execute(cand, packet: dict, decision: dict,
                                    f"in[{float(_fl)-_band:.1f},{float(_cp)+_band:.1f}] band={_band:.1f}")
             except (TypeError, ValueError):
                 pass
+    # (2d2) HIGH B-bracket "WON'T-REACH" NO veto (2026-06-10 HIGH deep-dive).
+    # A B-bracket BUY_NO with mu BELOW the bracket (mu < floor-0.5) bets the
+    # day's run-up falls short -- a forecast-ceiling call with ZERO obs support
+    # (the running-max ratchet can only hurt it; one hot hour kills it). The
+    # decision-stream replay (38k blend NO rows, 374 tickers, all-markets
+    # settled results, current gates): wont-reach = -32.3c/ct NEGATIVE IN ALL 4
+    # SPLITS (n=10) vs blows-past +10.0 / T-tail +18.8 (both all-splits +);
+    # dropping it lifts the kept book +7.8 -> +14.1c/ct (n=43, every split
+    # improved). The 6/9 SEA/ATL/DEN losers were exactly this shape. With the
+    # thin-margin gate above, a B-NO now requires mu ABOVE cap+band ("the heat
+    # blows past this bracket"). T-tail shorts unaffected (deep-margin tail NOs
+    # are +EV with USE_TAIL_EMPIRICAL_PYES). Rollback -> flag False.
+    if (series == "HIGH" and direction == "BUY_NO" and not _irrev
+            and getattr(_cfg, "PUSH_HIGH_NO_SKIP_WONT_REACH", False)):
+        _fl3 = packet.get("floor"); _cp3 = packet.get("cap"); _mu3 = packet.get("mu_chosen")
+        if _fl3 is not None and _cp3 is not None and _mu3 is not None:
+            try:
+                if float(_mu3) < float(_fl3) - 0.5:
+                    return False, (f"wont_reach_no mu={float(_mu3):.1f} < floor-0.5 "
+                                   f"({float(_fl3)-0.5:.1f}) -- no-obs-support ceiling bet")
+            except (TypeError, ValueError):
+                pass
     # (2g) HIGH-only one-sided NBM veto for BUY_NO (JUDGE-ONLY, 2026-05-29).
     # The kNN matcher structurally under-projects hot days (cannot exceed its
     # historical analogs' deltas), so on heat it fires confident BUY_NO on
