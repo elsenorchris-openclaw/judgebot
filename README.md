@@ -12,11 +12,22 @@ Live bot on EC2 `54.225.174.220`, dir `~/paper_judge_bot`, systemd service
 
 > 🔄 **2026-06-10: TRADING the market-BLEND strategy at $1/$1 (Chris).** Resumed from
 > the 6/9 halt at owner direction. Live config = the blend path TIGHTENED to the
-> live-fill-validated core (the 6/10 tactic sweep — see below): **HIGH $1 NO-only ≥18pp,
+> live-fill-validated core (the 6/10 tactic sweep — see below): **HIGH $5 NO-only ≥18pp,
 > spread ≤5c, price 25–80c** (deep window, taker, thin-margin 0.5, 1-bracket/station)
-> · **LOW $1 B-NO-only ≥8pp** (maker-at-mid + taker-fallback) · edge tiers OFF · no sells.
+> · **LOW $5 B-NO-only ≥8pp, price 40–80c, spread ≤5c, P(NO)≥0.55** (`PUSH_LOW_MIN_PNO`,
+> maker-at-mid + taker-fallback; the 6/10 LOW deep-dive stack, commit `99d657c` — expect
+> ~1 LOW fill per 1–2 nights) · edge tiers OFF · no sells. Sizes $1→$5 both books
+> 6/10 (`b46d6d1`, owner call ahead of settled fills on the new stacks).
 > ⛔ Sizing discipline: judge on **settled fills only**, never re-size on a
 > reconstruction/replay.
+>
+> **2026-06-10 LOW deep-dive (`99d657c`):** 4452 blend-era LOW B-NO decision rows
+> (shadow stream) × settled results for all 7228 LOW markets, taker-priced. The pre-min
+> window [min−3,−1.5] is the only non-negative timing zone (at/post-min = −9.5..−18c/ct
+> BOTH halves, n=103); the bleed is cheap contested NOs where a low ask manufactures
+> "edge" off a ~coinflip model (DAL 6/10: P(NO)=0.52 @28c). Stack (40–80c + spr≤5 +
+> P(NO)≥0.55) on the stream: **5/5 winners, +43.3c/ct over 8 days** (incl the bot's two
+> real MIA wins); would have blocked both 6/10 LOW losers. Small-n flag: judge on fills.
 >
 > **2026-06-10 tactic sweep (live fills, n=192 incl 6/9 book-resolved):** the 6/2
 > loosening experiment is REVERTED — its own watch-triggers fired on every knob:
@@ -28,7 +39,8 @@ Live bot on EC2 `54.225.174.220`, dir `~/paper_judge_bot`, systemd service
 > (n≤8/station) · top-N/day cap (collapses into the edge bar) · matcher as μ (paper book
 > n=23 settled, −0.4c/ct at quote prices) · more/other NWP + Jua (6/2: ceiling) ·
 > σ-widen/μ-offset (6/9: lose EV on 427d recon) · nwp_spread gate (6/9: rejected) ·
-> LOW levers (nothing flips LOW's −16c/ct; stays a $1 probe).
+> LOW levers via fills-only (n=22 too small — superseded by the 6/10 LOW
+> decision-stream deep-dive above, which found the 40c/spr5/P(NO).55 stack).
 >
 > (The 6/10 IRREVERSIBLE-LOCK-ONLY mode shipped earlier tonight was **REJECTED by Chris
 > ~30min later** — "we already have a locklag bot." `PUSH_IRREV_LOCK_ONLY=False`; code +
