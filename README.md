@@ -14,6 +14,9 @@ Live bot on EC2 `54.225.174.220`, dir `~/paper_judge_bot`, systemd service
 > the 6/9 halt at owner direction. Live config = the blend path TIGHTENED to the
 > live-fill-validated core (the 6/10 tactic sweep — see below): **HIGH $5 NO-only ≥18pp,
 > spread ≤5c, price 25–80c** (deep window, taker, thin-margin 0.5, 1-bracket/station)
+> + **won't-reach veto** (`PUSH_HIGH_NO_SKIP_WONT_REACH`, 6/10 HIGH deep-dive `6e318fb`: a B-NO
+> requires μ > cap+0.5 — only short brackets the heat blows past; the μ-below-bracket NO was
+> −32.3c/ct in all 4 splits; dropping it lifts the stream-kept book +7.8→+14.1c/ct, n=43)
 > · **LOW $5 B-NO-only ≥8pp, price 40–80c, spread ≤5c, P(NO)≥0.55** (`PUSH_LOW_MIN_PNO`,
 > maker-at-mid + taker-fallback; the 6/10 LOW deep-dive stack, commit `99d657c` — expect
 > ~1 LOW fill per 1–2 nights) · edge tiers OFF · no sells. Sizes $1→$5 both books
