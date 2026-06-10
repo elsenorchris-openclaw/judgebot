@@ -849,6 +849,43 @@ PUSH_MIN_EDGE_PP: int = 10  # 2026-06-09 (Claude, Chris-approved): SUMMER 6->10 
 PUSH_MIN_EDGE_PP_YES: int = 6  # 2026-06-07 (Chris): 2->6 HIGH YES bar (paired w/ NO->6, same variance-cut sweep — the 19mo edge-bar sweep was the combined HIGH book). YES bets are already higher-edge longshots so few are dropped; this keeps HIGH NO+YES on a uniform 6pp floor. Rollback ->2. # 2026-06-02 (Chris): 12->2 AGGRESSIVE (paired w/ NO->2). Blend HIGH YES is +EV down to ~2pp: [2,3)pp +5.9c/ct, [3,4) +12.4, [8,10) +11; cumulative >=2pp = 44.8/mo +12.3c/ct vs >=12 only 17.6/mo (total $ +47.7->+93.9, ~2x). Only [0,2)pp ~breakeven-neg (fee). Tail-bet gate (PUSH_TAIL_BET_MIN_EDGE_PP=25) still raises the bar when mu is inside the YES window. Rollback ->12.
 PUSH_MIN_EDGE_PP_LOW: int = 8  # 2026-06-06 (Chris): LOW-specific edge floor (HIGH stays 2pp). Backtest (low_tight.py, 2mo/943 trades): at the 2pp HIGH bar EVERY LOW cell is -EV incl B-NO (-0.4c); LOW B-NO only turns +EV BOTH-halves at >=8pp (8pp +2.8c, 10pp +3.3c, 15pp +7.7c — monotonic, LOSO +2.0..+4.8c). LOW is also gated to B-NO-only (PUSH_LOW_B_NO_ONLY), so this is effectively the B-NO bar. Rollback ->2 (= shares PUSH_MIN_EDGE_PP).
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 2026-06-10: IRREVERSIBLE-LOCK-ONLY trading mode (Chris: "make it trade with
+# something NEW that could bring profit"). The blend's mu-vs-market thesis is
+# LIVE-REFUTED (6/2-6/9 settled + book-resolved = -$156, EVERY cell negative;
+# README halt banner) -- so the bot no longer trades forecasts at all. It now
+# trades ONLY the one mechanism with a live-proven track record in this
+# household (locklag_bot's): an obs-DETERMINED outcome the market hasn't fully
+# repriced yet. Concretely: BUY_NO only, and only when the climate-day-validated
+# running extreme has IRREVERSIBLY killed the bracket --
+#     HIGH: running_max >= cap   + PUSH_IRREV_LOCK_BUFFER_F
+#     LOW : running_min <= floor - PUSH_IRREV_LOCK_BUFFER_F
+# (running max only rises / running min only falls => cannot un-happen; 1.0F is
+# the household OBS-CONFIRMED-LOSER buffer absorbing the typical +1F obs-vs-CLI
+# gap). The REVERSIBLE lock flavors (HIGH stays-below+past-peak, LOW stays-
+# above+past-min) are NOT traded -- those are "the peak/min is in" forecasts
+# (premature-lock: the locklag KATL 6/5 + judge DEN-T89 6/9 failure shape).
+# mu/sigma are irrelevant under the rm truncation (P(NO)=1 regardless of
+# forecast), so locked rows bypass the mu-QUALITY gates (blend-only, decision
+# window, thin-margin, sigma floor/ceiling, LOW front-wind, off-peak veto) and
+# keep ALL market/exec gates (spread<=25c, price band, dedup, position caps,
+# cash, one-bracket cap, $1 sizing, LOW maker engine / HIGH taker).
+# EVIDENCE (the honest version): this bot's own irreversible-lock tape is n=3 --
+# 1 clean fill (WON) + 2 losers that were BOTH the 5/20 stale-rm bug (fixed same
+# day by PUSH_VALIDATE_RM_CLIMATE_DAY; KXLOWTAUS-26MAY20-B67.5 is the exact
+# incident fill in that flag's comment). Post-fix the mode never fired again --
+# the deep window structurally excluded lock hours. UNTESTED-not-refuted, with
+# the mechanism live-proven next door. This is a $1-sized live test of a
+# mechanism, NOT a validated edge -- judge it on settled fills only.
+# Entry floor 50c: a locked-NO below 50c = the market pricing >=50% that OUR OBS
+# IS WRONG (KMDW 6/9 feed under-read) -- RULE#2, walk away. Ceiling stays
+# PUSH_MAX_ENTRY_C=90 (locklag ceil90: the last nickels don't cover obs-glitch
+# downside). Rollback -> False restores the legacy blend path exactly (which
+# stays parked at $1/$1 + NO-only + tiers off per the 6/9 halt protocol).
+PUSH_IRREV_LOCK_ONLY: bool = True
+PUSH_IRREV_LOCK_BUFFER_F: float = 1.0   # rm must clear the bracket edge by this many F (raise to tighten)
+PUSH_IRREV_LOCK_MIN_ENTRY_C: int = 50   # locked-NO entry floor, cents (sub-50c = market says our obs is wrong)
+
 # 2026-05-25: per-cell reliability trade-enable gate. Skip a BUY when the
 # matcher's HISTORICAL MAE for this (station, season, local_hour, side) cell
 # exceeds PUSH_MAE_GATE_F -- the k-NN projection is provably unreliable there,

@@ -40,6 +40,24 @@ def _disable_forecast_anchor_for_suite():
 
 
 @pytest.fixture(autouse=True)
+def _disable_irrev_lock_only_for_gate_tests():
+    """2026-06-10: the IRREVERSIBLE-LOCK-ONLY mode (Gate -1) blocks every
+    unlocked BUY before it reaches the downstream gates, which is the whole
+    point in prod but would short-circuit the legacy gate tests (they build
+    unlocked packets to exercise SPECIFIC gates: thin-margin, sigma, tail-bet,
+    off-peak, window, caps...). Same pattern as BLEND_ONLY_EXECUTION above:
+    default OFF for the suite; the dedicated test_irrev_lock_only re-enables it
+    explicitly inside its own mock.patch."""
+    try:
+        import config
+    except Exception:
+        yield
+        return
+    with mock.patch.object(config, "PUSH_IRREV_LOCK_ONLY", False):
+        yield
+
+
+@pytest.fixture(autouse=True)
 def _disable_climate_day_guard_for_suite():
     """2026-06-04: _in_decision_window refuses brackets whose climate_day != the
     station's current wall-clock date. The window/clock gate tests pass FIXED past

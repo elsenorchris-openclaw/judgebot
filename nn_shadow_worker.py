@@ -1528,6 +1528,61 @@ def _max_sibling_edge_pp(cand, mu, sigma) -> tuple[Optional[float], Optional[str
     return best_pp, best_tk
 
 
+def _irreversible_no_lock(packet: dict, cand) -> tuple[bool, str]:
+    """2026-06-10: IRREVERSIBLE-lock detector for the locked-only trading mode.
+
+    Returns (locked, dbg). True ONLY when the climate-day-validated running
+    extreme has already physically killed this bracket's YES in a way no later
+    weather can undo (running max only rises / running min only falls):
+
+        HIGH BUY_NO: rm >= cap   + PUSH_IRREV_LOCK_BUFFER_F   (blew out the top)
+        LOW  BUY_NO: rm <= floor - PUSH_IRREV_LOCK_BUFFER_F   (broke below)
+
+    The 1.0F default buffer is the household OBS-CONFIRMED-LOSER standard (obs
+    typically reads ~1F hot vs CLI settlement; the buffer absorbs that gap).
+    The REVERSIBLE lock flavors (HIGH stays-below past-peak, LOW stays-above
+    past-min) are deliberately NOT accepted -- those are forecasts that the
+    extreme is in ("premature lock": the locklag KATL 6/5 + judge DEN-T89 6/9
+    failure shape), not physics. T-tails on the open side (HIGH warm tail /
+    LOW cold tail) can never be NO-locked -- an overshoot there makes YES
+    CERTAIN, so they return False.
+    """
+    import config as _cfg
+    if packet.get("days_out") != 0:
+        return False, "not_d0"
+    rm = packet.get("running_min_or_max")
+    if rm is None:
+        return False, "rm_none"
+    try:
+        rm = float(rm)
+    except (TypeError, ValueError):
+        return False, "rm_not_numeric"
+    buf = float(getattr(_cfg, "PUSH_IRREV_LOCK_BUFFER_F", 1.0))
+    fl = packet.get("floor")
+    if fl is None:
+        fl = getattr(cand, "floor", None)
+    cp = packet.get("cap")
+    if cp is None:
+        cp = getattr(cand, "cap", None)
+    prefix = getattr(cand, "series_prefix", "") or ""
+    try:
+        if prefix == "KXHIGH":
+            if cp is None:
+                return False, "high_no_cap_tail"  # T-warm: overshoot = YES certain, never NO
+            if rm >= float(cp) + buf:
+                return True, f"HIGH rm={rm:.1f}>=cap+{buf:.1f}({float(cp)+buf:.1f})"
+            return False, f"high_rm {rm:.1f}<cap+{buf:.1f}"
+        if prefix == "KXLOW":
+            if fl is None:
+                return False, "low_no_floor_tail"  # T-cold: undershoot = YES certain, never NO
+            if rm <= float(fl) - buf:
+                return True, f"LOW rm={rm:.1f}<=floor-{buf:.1f}({float(fl)-buf:.1f})"
+            return False, f"low_rm {rm:.1f}>floor-{buf:.1f}"
+    except (TypeError, ValueError):
+        return False, "bad_floor_cap"
+    return False, f"unknown_series:{prefix}"
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Auto-execute via real Kalshi order (push pure-code architecture)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1557,6 +1612,32 @@ def _try_auto_execute(cand, packet: dict, decision: dict,
     direction = decision.get("decision", "")  # "BUY_NO" or "BUY_YES"
     if direction not in ("BUY_NO", "BUY_YES"):
         return False, "not_a_buy"
+    # (Gate -1) IRREVERSIBLE-LOCK-ONLY mode (2026-06-10, Chris: "make it trade with
+    # something NEW that could bring profit"). The blend's mu-vs-market thesis is
+    # live-refuted (6/2-6/9 = -$156, every cell negative), so when this flag is on
+    # the bot trades ONLY the mechanism with live proof next door (locklag's): an
+    # obs-DETERMINED outcome the market hasn't fully repriced. BUY_NO only, and only
+    # when the validated running extreme has IRREVERSIBLY killed the bracket
+    # (_irreversible_no_lock above). mu/sigma are irrelevant for these rows (the rm
+    # truncation alone forces P(NO)=1), so locked rows bypass the mu-QUALITY gates
+    # below (blend-only, decision window, thin-margin, sigma floor/ceiling, LOW
+    # front-wind, off-peak veto) while keeping every MARKET/EXEC gate (edge floor,
+    # spread, price band incl. the 50c locked floor, dedup, position caps, cash,
+    # one-bracket cap, sizing, maker/taker exec). Flag off -> legacy path, no
+    # locked special-casing anywhere.
+    _irrev = False
+    if getattr(_cfg, "PUSH_IRREV_LOCK_ONLY", False):
+        if direction != "BUY_NO":
+            return False, "irrev_lock_only: BUY_NO only"
+        _irrev, _irrev_dbg = _irreversible_no_lock(packet, cand)
+        if not _irrev:
+            return False, f"irrev_lock_only: not locked ({_irrev_dbg})"
+        packet["irrev_locked"] = True
+        packet["irrev_lock_dbg"] = _irrev_dbg
+        try:
+            decision["reason"] = f"{decision.get('reason') or ''} IRREV-LOCKED[{_irrev_dbg}]"
+        except Exception:
+            pass
     # (Gate 0) BLEND-ONLY EXECUTION (2026-06-02, Chris). Only place orders when the
     # forecast came from the BLEND (the validated edge, mu_method="blend_*"). The
     # nn_match matcher still runs as a shadow/fallback mu (and is logged) but does
@@ -1564,7 +1645,9 @@ def _try_auto_execute(cand, packet: dict, decision: dict,
     # _compute_market_mu is None, i.e. on thin/illiquid or post-peak markets where the
     # blend can't price and there's no edge anyway. Reversible: BLEND_ONLY_EXECUTION=False.
     paper_mode = False
-    if getattr(_cfg, "BLEND_ONLY_EXECUTION", True):
+    # locked rows are mu-source-agnostic (P(NO)=1 from the rm truncation), so the
+    # blend-only gate does not apply to them -- a matcher-fallback mu still trades.
+    if not _irrev and getattr(_cfg, "BLEND_ONLY_EXECUTION", True):
         _mm = str(packet.get("mu_method") or "")
         if not _mm.startswith("blend_"):
             # 2026-06-02 (Chris): route the nn_match matcher fallback to an ISOLATED
@@ -1742,10 +1825,15 @@ def _try_auto_execute(cand, packet: dict, decision: dict,
         if _cell_mae is not None and _cell_mae > _mae_thr:
             return False, (f"cell_mae_gate {_cell_mae:.2f}F>{_mae_thr:.1f}F "
                            f"({cand.station}/{series}/h{int(local_hour)})")
-    # (2) Decision window — peak-relative per (station, month, series)
-    in_win, win_dbg = _in_decision_window(cand.station, series, local_hour, cand.climate_day)
-    if not in_win:
-        return False, f"outside_window {cand.station}/{series}/{short_dir}: {win_dbg}"
+    # (2) Decision window — peak-relative per (station, month, series).
+    # IRREV-LOCKED bypass: an irreversible lock is valid at ANY hour (the window
+    # exists because forecast quality decays with lead; a lock is not a forecast).
+    if _irrev:
+        in_win, win_dbg = True, "irrev_locked_bypass"
+    else:
+        in_win, win_dbg = _in_decision_window(cand.station, series, local_hour, cand.climate_day)
+        if not in_win:
+            return False, f"outside_window {cand.station}/{series}/{short_dir}: {win_dbg}"
     # (2-spread) HIGH-only spread gate: crossing a wide bid-ask to buy pays
     # away the edge -- backtest HIGH spread>15c loses -21..-31c/bet vs +1.9c
     # filtered (both date-halves OOS). LOW left unfiltered ($1 live probe).
@@ -1775,7 +1863,7 @@ def _try_auto_execute(cand, packet: dict, decision: dict,
     # in PUSH_NO_MU_BOUNDARY_BAND_BY_STATION. Live-era 8-day EXEC pool: widening
     # from 0.5°F to 1.5°F lifts HIGH BUY_NO from +$8.69 to +$58.45 (lift $+49.76);
     # per-station tuning lifts further to +$63.79. WR 55%->66% on both pools.
-    if series == "HIGH" and direction == "BUY_NO" and getattr(
+    if series == "HIGH" and direction == "BUY_NO" and not _irrev and getattr(
             _cfg, "PUSH_SKIP_NO_MU_NEAR_BRACKET", False):
         _fl = packet.get("floor"); _cp = packet.get("cap"); _mu = packet.get("mu_chosen")
         if _fl is not None and _cp is not None and _mu is not None:
@@ -1816,7 +1904,7 @@ def _try_auto_execute(cand, packet: dict, decision: dict,
     # σ < 1.0 isolates the extreme tail with 0 false positives in the sample.
     # Complements (2d) -- together they catch "μ near boundary" + "matcher
     # confident outside boundary". Applies to B and T HIGH BUY_NO alike.
-    if series == "HIGH" and direction == "BUY_NO":
+    if series == "HIGH" and direction == "BUY_NO" and not _irrev:
         # 2026-05-28: per-station override extends the global floor at stations where
         # matcher σ is structurally under-calibrated (RMSz > 1.3 from 75-day phq backfill).
         _sig_floor_global = float(getattr(_cfg, "PUSH_HIGH_NO_MIN_SIGMA_F", 0.0))
@@ -1850,7 +1938,7 @@ def _try_auto_execute(cand, packet: dict, decision: dict,
     # Real-trade validation (judge+v1max actual n=165, 2026-05-15..25): sigma>2.5
     # BUY_NO 25%WR -$2.14/bet, negative BOTH date-halves AND both bots; skip lifts
     # the BUY_NO book +$34. Complements the fit-quality (stdev_delta) gate. 0=off.
-    if series == "HIGH" and direction == "BUY_NO":
+    if series == "HIGH" and direction == "BUY_NO" and not _irrev:
         _sig_ceil = float(getattr(_cfg, "PUSH_HIGH_NO_MAX_SIGMA_F", 0.0))
         if _sig_ceil > 0:
             _sig = packet.get("sigma_chosen")
@@ -1897,7 +1985,7 @@ def _try_auto_execute(cand, packet: dict, decision: dict,
     # wind is convective, not frontal). KLAX/KMIA excluded -- marine climate,
     # strong wind there is onshore sea-breeze with no frontal bias. Fires a
     # throttled Discord alert (_alert_low_front, deduped per station/day).
-    if series == "LOW":
+    if series == "LOW" and not _irrev:  # locked = the min already happened; wind can't undo the past
         front_wind = float(getattr(_cfg, "PUSH_LOW_FRONT_WIND_MPH", 18.0))
         excl = getattr(_cfg, "PUSH_LOW_FRONT_EXCLUDE", ())
         if front_wind > 0 and cand.station not in excl:
@@ -1924,6 +2012,11 @@ def _try_auto_execute(cand, packet: dict, decision: dict,
                             getattr(_cfg, "PUSH_MIN_ENTRY_C", 10)))
     else:
         min_c = int(getattr(_cfg, "PUSH_MIN_ENTRY_C", 10))
+    # IRREV-LOCKED floor: a locked-NO offered below 50c means the market prices
+    # >=50% that OUR OBS IS WRONG (the KMDW 6/9 under-read shape) -- RULE#2 says
+    # the market wins that argument; walk away. Overrides the LOW 10c floor too.
+    if _irrev:
+        min_c = max(min_c, int(getattr(_cfg, "PUSH_IRREV_LOCK_MIN_ENTRY_C", 50)))
     ask_c = packet.get("yes_ask_c") if direction == "BUY_YES" else packet.get("no_ask_c")
     if ask_c is None:
         return False, f"no_ask_for_{direction}"
@@ -1943,7 +2036,7 @@ def _try_auto_execute(cand, packet: dict, decision: dict,
     # is a cloud not a past-peak signal and those bets win). Fail-OPEN: missing
     # traj_max/cur_tmpf/h_to_peak -> not gated. DISTINCT from the nn_match peak-CLAMP
     # (that adjusts mu; this declines the entry) -> no double-veto. 0 disables.
-    if series == "HIGH":
+    if series == "HIGH" and not _irrev:  # locked entries are typically post-drop; the veto is a mu-quality gate
         _off_peak_f = float(getattr(_cfg, "PUSH_HIGH_SKIP_IF_OFF_PEAK_F", 0.0))
         if _off_peak_f > 0:
             _tmax = packet.get("traj_max")

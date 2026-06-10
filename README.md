@@ -10,16 +10,24 @@ Live bot on EC2 `54.225.174.220`, dir `~/paper_judge_bot`, systemd service
 (branch `main`). Trades daily HIGH/LOW temperature brackets on Kalshi
 (`KXHIGH*` / `KXLOW*`). Shares the **v1max Kalshi wallet** with `locklag_bot`.
 
-> 🛑 **HALTED 2026-06-09 (`KILL` file in repo root — hot-checked, delete to resume).**
-> Blend era 6/2–6/9 = **−$156 net** (settled + 6/9 book-resolved). **Every cell is
-> live-negative**: HIGH NO −3.1c/ct (n=115) · HIGH YES −14.1c/ct (n=55, disabled 6/9)
-> · LOW NO −16.0c/ct (n=19) · LOW YES −15.1c/ct (n=3, disabled 6/6). The first day
-> under the $5 NO-only ≥10pp config (6/9) lost −$33.74 (6W/11L) — the "+9.4c/ct"
-> 427-day recon edge never appeared in real fills (reconstruction ≠ live: no
-> slippage/counterparty). Sizes are parked at the **$1/$1 resume-safe floor** with
-> both edge-tiers OFF (2026-06-09 LATE de-risk). ⛔ **Do not `rm KILL` without a
-> live-demonstrated edge** (settled fills — not replays, not reconstructions). Open
-> positions settle as-is (no-sell policy stands).
+> 🔄 **2026-06-10: RESUMED in IRREVERSIBLE-LOCK-ONLY mode (`PUSH_IRREV_LOCK_ONLY=True`,
+> Chris directive: "make it trade with something new").** The bot **no longer trades
+> forecasts**. It trades exactly one mechanism — the locklag class, the only one with
+> live proof in this household: **BUY_NO at 50–90c when the validated running extreme
+> has IRREVERSIBLY killed the bracket** (HIGH `rm ≥ cap+1F` / LOW `rm ≤ floor−1F`;
+> reversible "peak/min is in" locks are NOT traded). μ/σ are irrelevant for these rows
+> (rm truncation forces P(NO)=1), so locked rows bypass the μ-quality gates (blend-only,
+> window, thin-margin, σ, front-wind, off-peak) and keep all market/exec gates. Sizes
+> $1/$1. This is a **$1 live test of a mechanism, not a validated edge** — judge it on
+> settled fills only.
+>
+> 🛑 Context — why the forecast path is off: blend era 6/2–6/9 = **−$156 net** (settled +
+> 6/9 book-resolved), **every cell live-negative**: HIGH NO −3.1c/ct (n=115) · HIGH YES
+> −14.1c/ct (n=55, off 6/9) · LOW NO −16.0c/ct (n=19) · LOW YES −15.1c/ct (n=3, off 6/6).
+> The first day of the $5 NO-only ≥10pp config (6/9) lost −$33.74 (6W/11L) — the "+9.4c/ct"
+> 427-day recon edge never appeared in real fills. The legacy blend path stays parked at
+> the $1/$1 floor, NO-only, tiers off (`PUSH_IRREV_LOCK_ONLY=False` restores it — against
+> the tape). ⛔ Do not re-size ANY cell without live settled-fill evidence.
 
 ---
 
