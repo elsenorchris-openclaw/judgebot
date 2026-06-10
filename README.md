@@ -10,6 +10,17 @@ Live bot on EC2 `54.225.174.220`, dir `~/paper_judge_bot`, systemd service
 (branch `main`). Trades daily HIGH/LOW temperature brackets on Kalshi
 (`KXHIGH*` / `KXLOW*`). Shares the **v1max Kalshi wallet** with `locklag_bot`.
 
+> 🛑 **HALTED 2026-06-09 (`KILL` file in repo root — hot-checked, delete to resume).**
+> Blend era 6/2–6/9 = **−$156 net** (settled + 6/9 book-resolved). **Every cell is
+> live-negative**: HIGH NO −3.1c/ct (n=115) · HIGH YES −14.1c/ct (n=55, disabled 6/9)
+> · LOW NO −16.0c/ct (n=19) · LOW YES −15.1c/ct (n=3, disabled 6/6). The first day
+> under the $5 NO-only ≥10pp config (6/9) lost −$33.74 (6W/11L) — the "+9.4c/ct"
+> 427-day recon edge never appeared in real fills (reconstruction ≠ live: no
+> slippage/counterparty). Sizes are parked at the **$1/$1 resume-safe floor** with
+> both edge-tiers OFF (2026-06-09 LATE de-risk). ⛔ **Do not `rm KILL` without a
+> live-demonstrated edge** (settled fills — not replays, not reconstructions). Open
+> positions settle as-is (no-sell policy stands).
+
 ---
 
 ## What it forecasts — the BLEND (the edge)
@@ -66,7 +77,7 @@ blend is on, `BLEND_DEEP_WINDOW_HOURS` overrides to the deep window
 (HIGH `(4.0, 2.5)` → peak−4..−2.5h; LOW `(3.0, 1.5)` → min−3..−1.5h).
 
 ### Gate stack (`_try_auto_execute`, in order; current live values)
-> **2026-06-09 SUMMER middle-path (Claude, Chris-approved, commits 4d05e18+c376448):** HIGH = **NO-only** (`PUSH_HIGH_NO_ONLY=True` drops HIGH YES — new gate below) at `PUSH_MIN_EDGE_PP=10` and **`$5`** (`PUSH_HIGH_MAX_BET_DEFAULT`, 1→3→5 as the audit held); thin-margin-NO is **ON** (band 0.5/offset 0). Audit: NO-only ≥10pp = +9.4c/ct/66%WR on 427 summer recon days (both halves +, LOSO all 7 +, robust to ~37% blowup rate). LOW = $3 B-NO-only edge-tiered. ⛔ The 6/8 "summer HIGH −EV / WR 0.41 / −$879 / high_edge.py seasonal" rationale was DELETED from config — UNREPRODUCIBLE (that tool was never committed and is gone; the production model never goes −EV in summer at ANY gating level, ungated +4.2c/ct → gated +9.4). ⚠️ The `=2` / `$8` / `thin-margin off` / `LOW $5` values in the prose below are the STALE pre-seasonal-swap (≤6/6) baseline — restore in fall ~Sep. cf `memory/project_blend_high_middlepath_shipped_20260609`.
+> **2026-06-09 SUMMER middle-path (Claude, Chris-approved, commits 4d05e18+c376448):** HIGH = **NO-only** (`PUSH_HIGH_NO_ONLY=True` drops HIGH YES — new gate below) at `PUSH_MIN_EDGE_PP=10` and **`$5`** (`PUSH_HIGH_MAX_BET_DEFAULT`, 1→3→5 as the audit held); thin-margin-NO is **ON** (band 0.5/offset 0). Audit: NO-only ≥10pp = +9.4c/ct/66%WR on 427 summer recon days (both halves +, LOSO all 7 +, robust to ~37% blowup rate). LOW = $3 B-NO-only edge-tiered. **→ 2026-06-09 LATE OUTCOME: this config's first live day lost −$33.74 (6W/11L) and the bot was HALTED (see banner at top); sizes are now $1 HIGH / $1 LOW, LOW edge-tier OFF.** ⛔ The 6/8 "summer HIGH −EV / WR 0.41 / −$879 / high_edge.py seasonal" rationale was DELETED from config — UNREPRODUCIBLE (that tool was never committed and is gone; the production model never goes −EV in summer at ANY gating level, ungated +4.2c/ct → gated +9.4). ⚠️ The `=2` / `$8` / `thin-margin off` / `LOW $5` values in the prose below are the STALE pre-seasonal-swap (≤6/6) baseline — restore in fall ~Sep. cf `memory/project_blend_high_middlepath_shipped_20260609`.
 edge floor (NO `PUSH_MIN_EDGE_PP=2` / YES `=2`) · in-bracket tail-bet gate (`=25`) · **HIGH no-only** (`PUSH_HIGH_NO_ONLY`, summer)
 · direction/series toggles · per-station bench (empty) · NWP-agreement gate (off)
 · cell-MAE gate (off) · **decision window** · HIGH spread ≤25c / **LOW spread ≤1c**
@@ -88,6 +99,10 @@ greedy first-qualify) is required — committing the *worst* leg collapses Sharp
 Rollback → `False` reverts to the legacy per-(station,series,dir,day) cap. LOW unaffected.
 
 ### Sizing  (2026-06-06, Chris)
+> **2026-06-09 LATE (post-KILL):** live values are now `PUSH_HIGH_MAX_BET_DEFAULT=$1`,
+> `max_bet_low_series_usd=$1`, `PUSH_EDGE_TIER_SIZING_LOW_ENABLED=False` — the prose
+> below is the stale pre-halt baseline.
+
 HIGH base `PUSH_HIGH_MAX_BET_DEFAULT` = **$5 SUMMER NO-only** (see the 2026-06-09 note above) / $8 fall baseline (NO/default — tail-protected by
 the one-bracket-per-station cap), `PUSH_HIGH_YES_MAX_BET_USD=$5` (YES held at $5 — thinner,
 walks thin books); LOW `max_bet_low_series_usd=$5` (raised 1→5; edge +7.22c/ct 14mo,
