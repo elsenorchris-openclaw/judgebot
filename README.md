@@ -11,11 +11,24 @@ Live bot on EC2 `54.225.174.220`, dir `~/paper_judge_bot`, systemd service
 (`KXHIGH*` / `KXLOW*`). Shares the **v1max Kalshi wallet** with `locklag_bot`.
 
 > 🔄 **2026-06-10: TRADING the market-BLEND strategy at $1/$1 (Chris).** Resumed from
-> the 6/9 halt at owner direction. Live config = the blend path in its tuned form:
-> **HIGH $1 NO-only ≥10pp** (deep window, taker, thin-margin band 0.5, 1-bracket/station)
+> the 6/9 halt at owner direction. Live config = the blend path TIGHTENED to the
+> live-fill-validated core (the 6/10 tactic sweep — see below): **HIGH $1 NO-only ≥18pp,
+> spread ≤5c, price 25–80c** (deep window, taker, thin-margin 0.5, 1-bracket/station)
 > · **LOW $1 B-NO-only ≥8pp** (maker-at-mid + taker-fallback) · edge tiers OFF · no sells.
-> ⛔ Sizing discipline: the blend is net-negative live to date (context below) — judge on
-> **settled fills only**, never re-size on a reconstruction/replay.
+> ⛔ Sizing discipline: judge on **settled fills only**, never re-size on a
+> reconstruction/replay.
+>
+> **2026-06-10 tactic sweep (live fills, n=192 incl 6/9 book-resolved):** the 6/2
+> loosening experiment is REVERTED — its own watch-triggers fired on every knob:
+> sub-18pp band −$51 (n=51), spread≥5c −$46.60 (n=21), 80–90c −$22.32 (n=19). The kept
+> core (≥18pp & ≤5c & ≤80c) = **+$50.75, n=32, +11.5c/ct, positive in all 4 splits**
+> (date-halves + odd/even days). Tactics tested & REJECTED: NWP-agreement gate ≤1.5–4F
+> (sign-flips across splits, confirms 5/26 rejection) · thin-margin band 1.0 (redundant
+> after the 18pp bar) · 50c price floor (live <40c NOs were +$38) · per-station carves
+> (n≤8/station) · top-N/day cap (collapses into the edge bar) · matcher as μ (paper book
+> n=23 settled, −0.4c/ct at quote prices) · more/other NWP + Jua (6/2: ceiling) ·
+> σ-widen/μ-offset (6/9: lose EV on 427d recon) · nwp_spread gate (6/9: rejected) ·
+> LOW levers (nothing flips LOW's −16c/ct; stays a $1 probe).
 >
 > (The 6/10 IRREVERSIBLE-LOCK-ONLY mode shipped earlier tonight was **REJECTED by Chris
 > ~30min later** — "we already have a locklag bot." `PUSH_IRREV_LOCK_ONLY=False`; code +
