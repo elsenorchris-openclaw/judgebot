@@ -73,6 +73,22 @@ def _disable_wont_reach_gate_for_gate_tests():
 
 
 @pytest.fixture(autouse=True)
+def _disable_clearance_and_tpno_for_gate_tests():
+    """2026-06-11: the blows-past clearance floor + T-tail P(NO) floor block
+    the near-bracket / mid-probability packets legacy gate tests use to
+    exercise OTHER gates. Same pattern as the fixtures above: default OFF for
+    the suite; test_high_clearance_tpno re-enables them explicitly."""
+    try:
+        import config
+    except Exception:
+        yield
+        return
+    with mock.patch.object(config, "PUSH_HIGH_NO_MIN_CLEARANCE_F", 0.0), \
+         mock.patch.object(config, "PUSH_HIGH_T_NO_MIN_PNO", 0.0):
+        yield
+
+
+@pytest.fixture(autouse=True)
 def _disable_climate_day_guard_for_suite():
     """2026-06-04: _in_decision_window refuses brackets whose climate_day != the
     station's current wall-clock date. The window/clock gate tests pass FIXED past

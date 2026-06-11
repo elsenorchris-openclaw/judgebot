@@ -1915,6 +1915,42 @@ def _try_auto_execute(cand, packet: dict, decision: dict,
                                    f"({float(_fl3)-0.5:.1f}) -- no-obs-support ceiling bet")
             except (TypeError, ValueError):
                 pass
+    # (2d3) Blows-past CLEARANCE floor (2026-06-11, the DEN-B76.5 loss shape).
+    # A B-bracket NO with mu only marginally above the bracket top is a coin
+    # flip wearing a confident price: stream clearance bands (38k rows) --
+    # clear [0,0.5)F = -7.8c/ct WR33, [0.5,1.0) split-unstable, >=1.0F =
+    # +15.1c/ct WR83 positive all 4 splits. Require mu >= cap + 0.5 +
+    # PUSH_HIGH_NO_MIN_CLEARANCE_F ("the heat clears the bracket top by a full
+    # degree", ~0.85 sigma). Subsumes/extends the wont-reach + thin-margin
+    # geometry on the upper side. B-brackets only; 0 disables.
+    if series == "HIGH" and direction == "BUY_NO" and not _irrev:
+        _clr_min = float(getattr(_cfg, "PUSH_HIGH_NO_MIN_CLEARANCE_F", 0.0))
+        if _clr_min > 0:
+            _fl4 = packet.get("floor"); _cp4 = packet.get("cap"); _mu4 = packet.get("mu_chosen")
+            if _fl4 is not None and _cp4 is not None and _mu4 is not None:
+                try:
+                    _clr = float(_mu4) - (float(_cp4) + 0.5)
+                    if _clr < _clr_min:
+                        return False, (f"bp_clearance mu={float(_mu4):.1f} clears cap+0.5 "
+                                       f"by {_clr:+.2f}F < {_clr_min:.2f}F")
+                except (TypeError, ValueError):
+                    pass
+    # (2d4) T-tail P(NO) floor (2026-06-11, the CHI-T86 loss shape). A cheap
+    # T-tail ask can manufacture "edge" while the model is ~coinflip
+    # (CHI 6/11: P(NO)=0.53 @28c, lost) -- the exact LOW pathology already
+    # gated by PUSH_LOW_MIN_PNO. Historically FREE on the kept book (every
+    # surviving T-NO had P(NO)>=0.75; n=0 below 0.60). T-brackets only
+    # (B covered by the clearance gate above); 0 disables.
+    if (series == "HIGH" and direction == "BUY_NO" and not _irrev
+            and (packet.get("floor") is None or packet.get("cap") is None)):
+        _tp_min = float(getattr(_cfg, "PUSH_HIGH_T_NO_MIN_PNO", 0.0))
+        _pyv = decision.get("p_yes")
+        if _tp_min > 0 and _pyv is not None:
+            try:
+                if (1.0 - float(_pyv)) < _tp_min:
+                    return False, f"t_pno_floor P(NO)={1.0-float(_pyv):.2f}<{_tp_min:.2f}"
+            except (TypeError, ValueError):
+                pass
     # (2g) HIGH-only one-sided NBM veto for BUY_NO (JUDGE-ONLY, 2026-05-29).
     # The kNN matcher structurally under-projects hot days (cannot exceed its
     # historical analogs' deltas), so on heat it fires confident BUY_NO on
