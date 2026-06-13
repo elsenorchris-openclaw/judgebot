@@ -122,9 +122,69 @@ _market_mu_cache: dict = {}
 # bucketed 0 / 1 / 2 / 3+ . implied_mu needs >=3, so 0/1/2 are the fallback cause
 # (thin or stale book); 3+ that still returns None would be an implied_mu reject.
 _mktmu_nbrk_hist = {"0": 0, "1": 0, "2": 0, "3+": 0}
+# 2026-06-13: REST ladder-recovery state. The WS BBO cache is sometimes SPARSE
+# for a station-day (tickers not yet populated / stale past the 10-min bound)
+# even when Kalshi's real ladder is fat (verified live: SEA/LV/CHI/NY each had
+# 8-9 two-sided brackets on REST while the cache held 1). Discarding those =
+# handing genuinely-priceable markets to the matcher/paper book. When the cache
+# is too sparse to fit the implied mean, fetch the real orderbook before going
+# dark. Per-event 120s cache bounds the REST cost.
+_rest_ladder_cache: dict = {}     # event_ticker -> (ts, [bracket dicts])
+_mktmu_rest_recover = [0, 0]       # [events_rest_fetched, calls_recovered_to_3plus]
+
+
+def _rest_ladder_brackets(events, station, climate_day, seen):
+    """REST-fetch the live quoted ladder for a station-day when the WS BBO cache
+    is too sparse to trust the implied mean. Returns bracket dicts (cents, fresh
+    two-sided quotes from the live orderbook), deduped against `seen` (tickers
+    already taken from the cache). Per-event 120s cache; capped orderbook fetches.
+    Fail-safe [] on any error -> caller just stays dark, exactly as before."""
+    import kalshi_client as kc
+    now = time.time()
+    max_ob = int(getattr(_cfg, "BLEND_MARKET_MU_REST_MAX_OB", 16))
+    out = []
+    fetched = 0
+    for ev in list(events)[:3]:
+        cached = _rest_ladder_cache.get(ev)
+        if cached and (now - cached[0]) < 120:
+            out.extend(cached[1]); continue
+        ev_br = []
+        try:
+            d = kc.get("/trade-api/v2/markets",
+                       {"event_ticker": ev, "status": "open", "limit": 60})
+            for m in (d.get("markets") or []):
+                if fetched >= max_ob:
+                    break
+                tk = m.get("ticker")
+                if not tk:
+                    continue
+                c2 = market_universe.parse_ticker(tk)
+                if not c2 or c2.station != station or c2.climate_day != climate_day:
+                    continue
+                ob = kc.get_orderbook(tk); fetched += 1
+                yds = ob.get("yes_dollars") or []
+                nds = ob.get("no_dollars") or []
+                if not yds or not nds:
+                    continue
+                # best yes bid = top of yes_dollars; best yes ask = 100 - best no bid
+                yb_c = float(yds[-1][0]) * 100.0
+                ya_c = 100.0 - float(nds[-1][0]) * 100.0
+                if ya_c <= yb_c or ya_c <= 0 or ya_c > 100:
+                    continue
+                ev_br.append({"kind": c2.bracket_kind, "floor": c2.floor, "cap": c2.cap,
+                              "yes_bid": yb_c, "yes_ask": ya_c, "_tk": tk})
+        except Exception:
+            ev_br = []
+        _rest_ladder_cache[ev] = (now, ev_br)
+        out.extend(ev_br)
+    _mktmu_rest_recover[0] += 1
+    return [b for b in out if b.get("_tk") not in seen]
+
 
 def _compute_market_mu(station, climate_day, prefix):
-    """Ladder-implied mu (cents) from the live BBO cache for this station-day."""
+    """Ladder-implied mu (cents) from the live BBO cache for this station-day,
+    with a REST orderbook fallback when the cache is too sparse to fit the mean
+    (2026-06-13: sparse CACHE != thin Kalshi ladder)."""
     key = (station, climate_day, prefix)
     now = time.time()
     c = _market_mu_cache.get(key)
@@ -135,12 +195,17 @@ def _compute_market_mu(station, climate_day, prefix):
         import blend_forecast
         import kalshi_ws as _kws
         brackets = []
+        seen = set()
+        events = set()
         for tk in list(_kws._bbo_cache.keys()):
             if not tk.startswith(prefix):
                 continue
             c2 = market_universe.parse_ticker(tk)
             if not c2 or c2.station != station or c2.climate_day != climate_day:
                 continue
+            # capture the event ticker even for stale/empty cache rows so the REST
+            # fallback can enumerate the full ladder when the cache is sparse.
+            events.add(tk.rsplit("-", 1)[0])
             ce = _kws._bbo_cache.get(tk)
             if not ce:
                 continue
@@ -158,6 +223,16 @@ def _compute_market_mu(station, climate_day, prefix):
                 continue
             brackets.append({"kind": c2.bracket_kind, "floor": c2.floor, "cap": c2.cap,
                              "yes_bid": yb_c, "yes_ask": ya_c})
+            seen.add(tk)
+        # REST fallback: the cache is too sparse to trust the implied mean. The
+        # Kalshi ladder may still be fat -> fetch it before going dark. Keeps the
+        # n>=3 quality bar (a genuinely thin ladder still returns None below).
+        if len(brackets) < 3 and getattr(_cfg, "BLEND_MARKET_MU_REST_FALLBACK", True):
+            rb = _rest_ladder_brackets(events, station, climate_day, seen)
+            if rb:
+                brackets.extend(rb)
+                if len(brackets) >= 3:
+                    _mktmu_rest_recover[1] += 1
         nb = len(brackets)
         _mktmu_nbrk_hist["3+" if nb >= 3 else str(nb)] += 1
         mu = blend_forecast.implied_mu(brackets)
@@ -381,8 +456,9 @@ def _blend_diag_tick(key):
     if time.time() - _blend_diag_ts[0] > 300:
         _blend_diag_ts[0] = time.time()
         try:
-            log.info("BLEND fallback diag (cumulative): %s | market_mu fresh-bracket hist: %s",
-                     dict(_blend_diag), dict(_mktmu_nbrk_hist))
+            log.info("BLEND fallback diag (cumulative): %s | market_mu fresh-bracket hist: %s "
+                     "| REST-recover [events_fetched, recovered_to_3+]: %s",
+                     dict(_blend_diag), dict(_mktmu_nbrk_hist), list(_mktmu_rest_recover))
         except Exception:
             pass
 def _compute_blend_override(cand, pkt, nn_res):

@@ -1392,6 +1392,22 @@ BLEND_EXEMPT_HIGH_SIGMA_FLOOR: bool = True
 # where there's no edge anyway). All 8 trades on 2026-06-02 were matcher (the blend
 # was dead-gated until be6402a, then fell back on a thin evening market). False reverts.
 BLEND_ONLY_EXECUTION: bool = True
+# 2026-06-13 (Chris): REST ladder-recovery for _compute_market_mu. The blend goes
+# dark (market_mu=None -> matcher fallback -> paper book, no real trade) when the
+# live WS BBO cache holds <3 fresh two-sided brackets for a station-day. Diagnostic
+# proved this is a SPARSE-CACHE problem, not a thin-MARKET one: on 6/13 the dark
+# cases saw 1 cached bracket while Kalshi's real ladder had 8-9 two-sided (SEA/LV/
+# CHI/NY via REST) -- genuinely-priceable markets were being handed to the matcher.
+# When True, _compute_market_mu fetches the live orderbook ladder before going dark
+# (per-event 120s cache, <=BLEND_MARKET_MU_REST_MAX_OB orderbook calls). KEEPS the
+# n>=3 quality bar: a market whose REAL ladder is also thin still returns None (no
+# forcing a price off 1-2 brackets). Recovered markets trade through the SAME gates
+# (edge>=18, clearance>=1, spread<=5, price band) -> coverage expansion, not a
+# quality cut. ⚠️these are a NEW market population (previously paper-only); judge
+# their settled fills like any other change. Watch the REST-recover counter in the
+# "BLEND fallback diag" log line. Rollback -> False (revert to cache-only / matcher).
+BLEND_MARKET_MU_REST_FALLBACK: bool = True
+BLEND_MARKET_MU_REST_MAX_OB: int = 16   # cap orderbook fetches per sparse station-day eval
 # 2026-06-02 (Chris): the nn_match matcher fallback "did well" on 6/2 (every position
 # it bought was positive MTM). With BLEND_ONLY_EXECUTION on, it is blocked from REAL
 # orders -- so instead route it to an ISOLATED PAPER book (data/paper_trades.jsonl):
