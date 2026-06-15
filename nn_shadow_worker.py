@@ -132,6 +132,23 @@ _mktmu_nbrk_hist = {"0": 0, "1": 0, "2": 0, "3+": 0}
 _rest_ladder_cache: dict = {}     # event_ticker -> (ts, [bracket dicts])
 _mktmu_rest_recover = [0, 0]       # [events_rest_fetched, calls_recovered_to_3plus]
 
+# 2026-06-15 (code audit): transient-failure backoff for the blend's data-helper
+# caches. They cached their result for a FULL TTL -- which wrongly pinned a transient
+# failure (a 429, a timeout, a momentary sparse book) as "the answer" for the whole
+# TTL, darkening/degrading the blend long after the source recovered (directly defeats
+# the 6/13 REST-recovery ship). Fix: cache an HONEST result at full TTL, but cache a
+# transient FAILURE only briefly so it retries soon. _cache_ts ages a failure entry so
+# (now - ts) crosses the TTL after `backoff` seconds. (A legitimately-thin market still
+# caches at full TTL -- that's an honest answer, not a failure, so no re-REST storm.)
+_FAIL_BACKOFF_FAST = 20.0    # Kalshi (cheap, fast-moving books): retry ~20s after a blip
+_FAIL_BACKOFF_SLOW = 300.0   # OpenMeteo (paid, slow-moving NWP): retry ~5min, not the full 1h
+
+
+def _cache_ts(now: float, ttl: float, ok: bool, backoff: float) -> float:
+    """Cache timestamp helper: `now` for an honest result (full TTL); for a transient
+    failure, aged so the entry expires after `backoff` seconds instead of the full TTL."""
+    return now if ok else (now - max(0.0, ttl - backoff))
+
 
 def _rest_ladder_brackets(events, station, climate_day, seen):
     """REST-fetch the live quoted ladder for a station-day when the WS BBO cache
@@ -149,9 +166,11 @@ def _rest_ladder_brackets(events, station, climate_day, seen):
         if cached and (now - cached[0]) < 120:
             out.extend(cached[1]); continue
         ev_br = []
+        list_ok = False
         try:
             d = kc.get("/trade-api/v2/markets",
                        {"event_ticker": ev, "status": "open", "limit": 60})
+            list_ok = True
             for m in (d.get("markets") or []):
                 if fetched >= max_ob:
                     break
@@ -161,21 +180,28 @@ def _rest_ladder_brackets(events, station, climate_day, seen):
                 c2 = market_universe.parse_ticker(tk)
                 if not c2 or c2.station != station or c2.climate_day != climate_day:
                     continue
-                ob = kc.get_orderbook(tk); fetched += 1
-                yds = ob.get("yes_dollars") or []
-                nds = ob.get("no_dollars") or []
-                if not yds or not nds:
+                # one bad orderbook (429/5xx) must NOT discard the whole event's
+                # ladder -- skip just that bracket and keep the good ones collected.
+                try:
+                    ob = kc.get_orderbook(tk); fetched += 1
+                    yds = ob.get("yes_dollars") or []
+                    nds = ob.get("no_dollars") or []
+                    if not yds or not nds:
+                        continue
+                    # best yes bid = top of yes_dollars; best yes ask = 100 - best no bid
+                    yb_c = float(yds[-1][0]) * 100.0
+                    ya_c = 100.0 - float(nds[-1][0]) * 100.0
+                    if ya_c <= yb_c or ya_c <= 0 or ya_c > 100:
+                        continue
+                    ev_br.append({"kind": c2.bracket_kind, "floor": c2.floor, "cap": c2.cap,
+                                  "yes_bid": yb_c, "yes_ask": ya_c, "_tk": tk})
+                except Exception:
                     continue
-                # best yes bid = top of yes_dollars; best yes ask = 100 - best no bid
-                yb_c = float(yds[-1][0]) * 100.0
-                ya_c = 100.0 - float(nds[-1][0]) * 100.0
-                if ya_c <= yb_c or ya_c <= 0 or ya_c > 100:
-                    continue
-                ev_br.append({"kind": c2.bracket_kind, "floor": c2.floor, "cap": c2.cap,
-                              "yes_bid": yb_c, "yes_ask": ya_c, "_tk": tk})
         except Exception:
-            ev_br = []
-        _rest_ladder_cache[ev] = (now, ev_br)
+            list_ok = False
+        # cache an HONEST enumeration (even if thin/empty) for 120s; on a list-fetch
+        # failure DON'T pin an empty ladder -- expire fast (~20s) so it retries.
+        _rest_ladder_cache[ev] = (_cache_ts(now, 120.0, list_ok, _FAIL_BACKOFF_FAST), ev_br)
         out.extend(ev_br)
     _mktmu_rest_recover[0] += 1
     return [b for b in out if b.get("_tk") not in seen]
@@ -236,9 +262,14 @@ def _compute_market_mu(station, climate_day, prefix):
         nb = len(brackets)
         _mktmu_nbrk_hist["3+" if nb >= 3 else str(nb)] += 1
         mu = blend_forecast.implied_mu(brackets)
+        ok = True   # honest computation -- mu may legitimately be None if truly thin
     except Exception:
         mu = None
-    _market_mu_cache[key] = (now, mu)
+        ok = False
+    # cache an honest result (incl legit-thin None) at full TTL to avoid re-REST
+    # storms; an EXCEPTION expires fast (~20s) so a transient blip doesn't pin the
+    # blend dark for 3 min.
+    _market_mu_cache[key] = (_cache_ts(now, 180.0, ok, _FAIL_BACKOFF_FAST), mu)
     return mu
 
 _OM_MODELS = ["gfs_seamless", "ecmwf_ifs025", "icon_seamless", "gem_global",
@@ -295,7 +326,9 @@ def _compute_blend_nwp(station, climate_day, side):
                     out = mm
     except Exception:
         out = None
-    _blend_nwp_cache[key] = (now, out)
+    # honest forecast cached 1h; a transient fetch failure / <5-model response
+    # expires in ~5min so we don't sit on the conservative blend for a full hour.
+    _blend_nwp_cache[key] = (_cache_ts(now, 3600.0, out is not None, _FAIL_BACKOFF_SLOW), out)
     return out
 
 
@@ -440,7 +473,9 @@ def _compute_fc_min_hour(station, climate_day):
                 out = best[1]
     except Exception:
         out = None
-    _fc_minhour_cache[key] = (now, out)
+    # honest result cached 1h; a transient fetch failure expires in ~5min so the LOW
+    # forecast-lock isn't disabled for a full hour after a blip.
+    _fc_minhour_cache[key] = (_cache_ts(now, 3600.0, out is not None, _FAIL_BACKOFF_SLOW), out)
     return out
 
 
