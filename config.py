@@ -495,6 +495,32 @@ GUARDRAILS = {
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 2026-06-16: TRAILING SETTLED-P&L AUTO-HALT (Chris). The GUARDRAILS
+# daily_loss_kill_usd breaker is structurally INERT for this bot: it watches
+# ctx.daily_realized_pnl_usd, which only moves when the bot SELLS — but this is a
+# buy-and-hold bot whose P&L materializes at SETTLEMENT, so the breaker can never
+# fire on held-to-settlement losses (the 6/9 -$33 day needed a MANUAL KILL file).
+# This breaker measures the bot's OWN cumulative SETTLED P&L (fee-bearing, joined
+# from trades.jsonl + Kalshi settlements, exits subtracted) and writes the KILL
+# file automatically when it bleeds, so the existing hot-checked kill path halts
+# all buys without a human. Two independent triggers, either one halts:
+#   (a) trailing window: sum of the last AUTO_HALT_TRAILING_DAYS *settled* climate-
+#       days <= AUTO_HALT_TRAILING_LOSS_USD, once >= AUTO_HALT_MIN_DAYS exist
+#       (catches the slow "we lose money every day" bleed — the 6/9 pattern);
+#   (b) single-day catastrophe: any one settled day <= AUTO_HALT_DAY_LOSS_USD
+#       (fires regardless of min-days; the role the dead -$100 daily breaker had).
+# Defaults sized to $10 HIGH (a normal bad day ~ -$15..-20): -$60 over 3 days =
+# a sustained bleed beyond variance; -$75 single day = catastrophe. Tune freely.
+# Resume = investigate, then `rm KILL` (same as a manual halt). Idempotent: does
+# nothing once KILL exists. Set AUTO_HALT_ENABLED=False to disable entirely.
+AUTO_HALT_ENABLED: bool = True
+AUTO_HALT_TRAILING_DAYS: int = 3
+AUTO_HALT_TRAILING_LOSS_USD: float = -60.0
+AUTO_HALT_MIN_DAYS: int = 3
+AUTO_HALT_DAY_LOSS_USD: float = -75.0
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # F-OBS-ANCHORED-PRE prescreen toggle
 # ─────────────────────────────────────────────────────────────────────────────
 # 2026-05-17 21:xx UTC: disabled per Chris ("turn off obs anchored pre reject")

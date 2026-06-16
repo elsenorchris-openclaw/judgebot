@@ -2630,6 +2630,122 @@ def _resolve_settlements(rt: "Runtime") -> int:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Trailing settled-P&L auto-halt (2026-06-16). See config AUTO_HALT_* block.
+# ─────────────────────────────────────────────────────────────────────────────
+_auto_halt_last_check = [0.0]   # last recompute ts (recompute at most every 5 min)
+
+
+def _settled_pnl_by_day() -> dict:
+    """This bot's OWN settled P&L per climate-day (fee-bearing, matches
+    daily_pnl_readout). Joins our trades.jsonl entries to Kalshi settlements and
+    subtracts kind=exit sell rows so a sold position isn't counted as held-to-
+    settlement. Returns {climate_day: pnl_usd}."""
+    import math
+    ent: dict = {}
+    exits: dict = {}
+    try:
+        fh = open(config.TRADES_PATH)
+    except FileNotFoundError:
+        return {}
+    with fh:
+        for ln in fh:
+            try:
+                d = json.loads(ln)
+            except Exception:
+                continue
+            tk = d.get("market_ticker")
+            if not tk:
+                continue
+            k = d.get("kind")
+            if k == "entry":
+                ep = d.get("entry_price"); cnt = d.get("count") or 0
+                e = ent.get(tk)
+                if e is None:
+                    ent[tk] = {"action": d.get("action"), "ep": ep, "cnt": cnt,
+                               "day": d.get("date_str")}
+                elif ep is not None and e["ep"] is not None and (e["cnt"] + cnt) > 0:
+                    # multiple entry rows (top-up): cost-weight the avg price
+                    e["ep"] = (e["ep"] * e["cnt"] + ep * cnt) / (e["cnt"] + cnt)
+                    e["cnt"] += cnt
+            elif k in ("exit", "sell"):
+                exits[tk] = exits.get(tk, 0) + (d.get("sell_count") or 0)
+    setts: dict = {}
+    for s in kalshi_client.list_settlements(limit=500):
+        if s.get("market_result") in ("yes", "no"):
+            setts[s["ticker"]] = s["market_result"]
+    by_day: dict = {}
+    for tk, e in ent.items():
+        res = setts.get(tk)
+        if res is None or e["ep"] is None or not e["cnt"]:
+            continue
+        held = e["cnt"] - exits.get(tk, 0)
+        if held <= 0:
+            continue
+        won = (res == "no") if e["action"] == "BUY_NO" else (res == "yes")
+        p = float(e["ep"]); n = int(held)
+        fee = math.ceil(0.07 * p * (1 - p) * n * 100) / 100.0
+        pnl = (n * (1 - p) - fee) if won else (-n * p - fee)
+        by_day[e["day"]] = by_day.get(e["day"], 0.0) + pnl
+    return by_day
+
+
+def _check_auto_halt(rt: "Runtime") -> None:
+    """Trailing settled-P&L circuit breaker — writes the KILL file (which the
+    existing hot-check then enforces) when the bot's own settled P&L bleeds past
+    the configured thresholds. Replaces the manual KILL intervention 6/9 needed.
+    Idempotent: no-op once KILL exists. Recomputes at most every 5 min."""
+    if not getattr(config, "AUTO_HALT_ENABLED", False):
+        return
+    if config.KILL_SWITCH_PATH.exists():
+        return  # already halted (manual or prior auto-halt) — nothing to do
+    now = time.time()
+    if now - _auto_halt_last_check[0] < 300:
+        return
+    _auto_halt_last_check[0] = now
+    try:
+        days = _settled_pnl_by_day()
+    except Exception:
+        log.exception("auto-halt: settled-P&L computation failed")
+        return
+    if not days:
+        return
+    win = int(getattr(config, "AUTO_HALT_TRAILING_DAYS", 3))
+    min_days = int(getattr(config, "AUTO_HALT_MIN_DAYS", 3))
+    trail_thr = float(getattr(config, "AUTO_HALT_TRAILING_LOSS_USD", -60.0))
+    day_thr = float(getattr(config, "AUTO_HALT_DAY_LOSS_USD", -75.0))
+    ordered = sorted(days.keys())
+    recent = ordered[-win:]
+    reason = None
+    # (a) single-day catastrophe — fires regardless of min-days
+    worst_day = min(ordered, key=lambda d: days[d])
+    if days[worst_day] <= day_thr:
+        reason = (f"single-day settled P&L {worst_day} ${days[worst_day]:+.2f} "
+                  f"<= catastrophe ${day_thr:.2f}")
+    # (b) trailing-window bleed
+    if reason is None and len(recent) >= min_days:
+        cum = sum(days[d] for d in recent)
+        if cum <= trail_thr:
+            reason = (f"trailing {len(recent)}d settled P&L ${cum:+.2f} "
+                      f"<= halt ${trail_thr:.2f} (days {recent[0]}..{recent[-1]})")
+    if reason is None:
+        return
+    try:
+        config.KILL_SWITCH_PATH.write_text(
+            f"AUTO-HALT {guardrails.today_utc(now)} — {reason}. Trailing settled-P&L "
+            f"circuit breaker (config AUTO_HALT_*). Investigate, then `rm KILL` to resume.\n")
+    except Exception:
+        log.exception("auto-halt: failed to write KILL file")
+        return
+    rt.ctx.kill_switch_active = True   # enforce THIS cycle, not just next
+    log.error("🛑 AUTO-HALT TRIGGERED: %s — wrote KILL, all buys blocked", reason)
+    try:
+        notify_trade(f"🛑 **AUTO-HALT** — {reason}\n"
+                     f"KILL written; all buys blocked. Investigate, then `rm KILL` to resume.")
+    except Exception:
+        pass
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Post-LLM conviction-cap constants (module-level so we don't rebuild them per
 # LLM result). Used in run_entry_loop's per-decision block.
 # ─────────────────────────────────────────────────────────────────────────────
@@ -4521,6 +4637,14 @@ def one_cycle(rt: Runtime) -> None:
             log.info("settlements logged: %d new", n_new)
     except Exception:
         log.exception("settlement resolver error")
+
+    # Trailing settled-P&L auto-halt — writes KILL automatically when the bot's own
+    # settled P&L bleeds past the configured thresholds (the daily_loss_kill breaker
+    # is inert for buy-and-hold). Runs after settlements so it sees fresh outcomes.
+    try:
+        _check_auto_halt(rt)
+    except Exception:
+        log.exception("auto-halt check error")
 
     # 2026-05-19 push pure-code arch v2: when LLM is off, push owns trades.
     # Skip the heavy entry loop AND the loud Discord cycle-done post — main
