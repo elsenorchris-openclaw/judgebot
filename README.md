@@ -21,6 +21,16 @@ Live bot on EC2 `54.225.174.220`, dir `~/paper_judge_bot`, systemd service
 > maker-at-mid + taker-fallback; the 6/10 LOW deep-dive stack, commit `99d657c` — expect
 > ~1 LOW fill per 1–2 nights) · edge tiers OFF · no sells. Sizes $1→$5 both books
 > 6/10 (`b46d6d1`, owner call ahead of settled fills on the new stacks).
+> 🛑 **AUTO-HALT (`6/16`, `e381d1d`+`948da07`):** a trailing settled-P&L circuit breaker
+> now writes the `KILL` file automatically (the GUARDRAILS `daily_loss_kill_usd` breaker
+> is inert here — it only watches sell-realized P&L, but this bot is buy-and-hold, which
+> is why 6/9 needed a manual KILL). Triggers (either): trailing `AUTO_HALT_TRAILING_DAYS=3`
+> settled days sum ≤ `AUTO_HALT_TRAILING_LOSS_USD=-60` (slow bleed), or any single settled
+> day ≤ `AUTO_HALT_DAY_LOSS_USD=-75` (catastrophe). Runs in `one_cycle` after settlement
+> resolution, posts a Discord alert, sets `kill_switch_active` same-cycle. Resume = `rm KILL`
+> (sticky: a watermark in `data/auto_halt_state.json` means only settled days NEWER than the
+> last halt can re-fire, so removing KILL actually resumes instead of instantly re-halting).
+> `AUTO_HALT_ENABLED=False` disables.
 > ⛔ Sizing discipline: judge on **settled fills only**, never re-size on a
 > reconstruction/replay.
 >
