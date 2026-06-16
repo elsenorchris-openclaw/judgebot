@@ -144,6 +144,25 @@ the worst-5% station-day drawdown ~3× (−$1930→−$636) and lifts per-stn-da
 greedy first-qualify) is required — committing the *worst* leg collapses Sharpe to 0.022.
 Rollback → `False` reverts to the legacy per-(station,series,dir,day) cap. LOW unaffected.
 
+**Per-DAY HIGH cap (`PUSH_MAX_HIGH_FILLS_PER_DAY=3`, 2026-06-16).** Caps TOTAL HIGH
+fills/day across stations — distinct from the per-station cap above (6/11's blowup was
+10 *different* stations, which one-bracket-per-station doesn't limit). The faithful
+replay (`tools/replay_backtest.py`) showed the residual loss driver is **correlated
+forecast-miss days**: on the current-config kept fills, 2-3 fills/day = +$56 but 4+
+fills/day = −$9.28. Capping is both-halves-positive (first-3/day lifts H2 −$6.1→−$0.8;
+first-2/day → +$6.3). Default 3 = mechanism-faithful (keep the winning 2-3 band, cut the
+losing 4+ tail), barely touches volume; `=2` backtests stronger but trims the good band.
+Gate inside the reservation lock (counts filled-today + pending HIGH). `0` = off.
+
+### Faithful backtest tool (`tools/replay_backtest.py`, 2026-06-16)
+Recreates the bot's **settled wallet P&L** from `trades.jsonl` actual fills × Kalshi
+settlements (self-asserts it reproduces ground truth, currently −$142.31 since 6/2),
+enriches each real fill with its decision-time shadow row (μ/edge/clearance/spread/
+p_yes), and evaluates a candidate config by counterfactually removing real fills
+(faithful for **tightening**). Confirmed the shipped tightened config = −$142 → +$54 on
+the same fills. ⚠️Use it to vet every future config change vs ground truth — the lesson
+it encodes is that a backtest which doesn't match the wallet is worthless.
+
 ### Sizing  (2026-06-06, Chris)
 > **2026-06-09 LATE (post-KILL):** live values are now `PUSH_HIGH_MAX_BET_DEFAULT=$1`,
 > `max_bet_low_series_usd=$1`, `PUSH_EDGE_TIER_SIZING_LOW_ENABLED=False` — the prose
