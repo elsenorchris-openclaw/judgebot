@@ -626,6 +626,32 @@ def _release_pending(cap_key) -> None:
         pass
 
 
+def _count_high_fills_today(climate_day) -> int:
+    """This bot's FILLED HIGH positions for `climate_day` across ALL stations/directions
+    — the daily HIGH exposure for the per-day cap (2026-06-16). Distinct from the
+    per-station cap: the correlated-forecast-miss risk is ACROSS stations (6/11 was 10
+    different stations losing together). Call under _pending_buys_lock."""
+    n = 0
+    try:
+        for tk, p in (getattr(_rt, "positions", {}) or {}).items():
+            if not isinstance(p, dict):
+                continue
+            try:
+                if float(p.get("cost", 0)) <= 0:
+                    continue
+            except (TypeError, ValueError):
+                continue
+            if not str(tk).startswith("KXHIGH"):
+                continue
+            pd = p.get("date_str") or p.get("climate_day")
+            if pd and pd != climate_day:
+                continue
+            n += 1
+    except Exception:
+        pass
+    return n
+
+
 def _count_existing_slots(cand, direction) -> int:
     """Filled positions + resting maker orders occupying this (station, series, direction,
     climate_day) slot = the gate-5 position-cap occupancy. Call under _pending_buys_lock."""
@@ -2278,6 +2304,21 @@ def _try_auto_execute(cand, packet: dict, decision: dict,
         _msib_edge, _msib_tk = _max_sibling_edge_pp(cand, _mu_c, _sig_c)
     _cap_key = (cand.station, cand.series_prefix, direction)
     with _pending_buys_lock:
+        # (5-day) Per-day HIGH exposure cap (2026-06-16, faithful-replay finding).
+        # Days with 4+ qualifying HIGH brackets are correlated-forecast-miss days that
+        # LOSE (settled-fill replay: 2-3 fills/day +$56, 4+ fills/day -$9.28; capping
+        # both-halves-positive). The bot's real unit of risk is the day's FORECAST, not
+        # the bracket — when the airmass call is wrong it's wrong across many stations at
+        # once. This caps total HIGH fills/day across stations (complements the per-STATION
+        # one-bracket cap, which 6/11's 10-different-station blowup slipped past). Counts
+        # filled-today + all pending HIGH (pending is inherently today/in-window). 0=off.
+        _day_cap = int(getattr(_cfg, "PUSH_MAX_HIGH_FILLS_PER_DAY", 0))
+        if _day_cap > 0 and cand.series_prefix == "KXHIGH":
+            _pend_high = sum(v for k, v in _pending_buys.items()
+                             if isinstance(k, tuple) and len(k) >= 2 and k[1] == "KXHIGH")
+            _day_n = _count_high_fills_today(cand.climate_day) + _pend_high
+            if _day_n >= _day_cap:
+                return False, f"high_day_cap {cand.climate_day}: {_day_n}>={_day_cap}"
         if _one_per_stn:
             # cap = 1 bracket/station-day across BOTH directions (filled + resting + pending)
             _stn_n = (_count_existing_slots(cand, "BUY_NO")

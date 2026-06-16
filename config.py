@@ -1142,6 +1142,21 @@ PUSH_ONE_BRACKET_PER_STATION_HIGH: bool = True
 # it — avoids float-noise thrash on near-ties (the cap-1 still prevents a double-buy).
 PUSH_ONE_BRACKET_EDGE_TOL_PP: float = 0.25
 
+# 2026-06-16 (autonomous, faithful-replay finding): per-DAY HIGH exposure cap.
+# The faithful backtest (tools/replay_backtest.py, ground-truth-validated -$142.31)
+# showed the bot's residual loss driver is CORRELATED FORECAST-MISS DAYS: when the
+# day's airmass call is wrong it's wrong across MANY stations at once, so days with
+# many qualifying HIGH brackets over-expose to one forecast. On the current-config
+# kept fills: 2-3 fills/day = +$56, 4+ fills/day = -$9.28 (H2 -9.28); a per-day cap
+# is both-halves-positive (first-3/day H2 -6.1 -> -0.8; first-2/day -> +$6.3). This
+# caps TOTAL HIGH fills/day across stations (distinct from the per-STATION one-bracket
+# cap — 6/11's blowup was 10 DIFFERENT stations, which that cap doesn't limit).
+# Default 3 = the mechanism-faithful value: keep the winning 2-3 band, cut only the
+# losing 4+ tail; barely touches volume at current tightness. (cap=2 backtested
+# stronger, +$65/H2+6, but trims into the validated-good band -> more overfit risk;
+# tune here. 0 = off.) ⚠️counterfactual is faithful for this tightening; judge live.
+PUSH_MAX_HIGH_FILLS_PER_DAY: int = 3
+
 # Pace-curve source files for empirical peak/min lookup
 PUSH_PACE_CURVES_HIGH_PATH: str = "/home/ubuntu/data/pace_curves_v2.json"
 PUSH_PACE_CURVES_LOW_PATH: str = "/home/ubuntu/data/pace_curves_low_v2.json"
