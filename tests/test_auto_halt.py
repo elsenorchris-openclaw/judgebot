@@ -28,10 +28,12 @@ class _Base(unittest.TestCase):
         self._tmp = tempfile.mkdtemp()
         self.trades = Path(self._tmp) / "trades.jsonl"
         self.kill = Path(self._tmp) / "KILL"
+        self.state = Path(self._tmp) / "auto_halt_state.json"
         pjb._auto_halt_last_check[0] = 0.0
         self._patches = [
             mock.patch.object(config, "TRADES_PATH", self.trades),
             mock.patch.object(config, "KILL_SWITCH_PATH", self.kill),
+            mock.patch.object(pjb, "_AUTO_HALT_STATE_PATH", self.state),
             mock.patch.object(config, "AUTO_HALT_ENABLED", True),
             mock.patch.object(config, "AUTO_HALT_TRAILING_DAYS", 3),
             mock.patch.object(config, "AUTO_HALT_TRAILING_LOSS_USD", -60.0),
@@ -144,6 +146,36 @@ class TestAutoHalt(_Base):
             with self._setts({"KXHIGHX-26JUN10-B79.5": "yes"}):
                 pjb._check_auto_halt(self.rt)
         self.assertFalse(self.kill.exists())
+
+    def test_resume_is_sticky_same_data_does_not_rehalt(self):
+        # catastrophe halts; ack watermark written; after `rm KILL` the SAME data
+        # must NOT re-halt (otherwise resume is impossible).
+        self._write([_entry("KXHIGHX-26JUN10-B79.5", "BUY_NO", 0.88, 100, "2026-06-10")])
+        with self._setts({"KXHIGHX-26JUN10-B79.5": "yes"}):
+            pjb._check_auto_halt(self.rt)
+            self.assertTrue(self.kill.exists())
+            self.assertTrue(self.state.exists(), "ack watermark should be persisted")
+            # operator resumes
+            self.kill.unlink()
+            self.rt.ctx.kill_switch_active = False
+            pjb._auto_halt_last_check[0] = 0.0   # bypass throttle for the test
+            pjb._check_auto_halt(self.rt)
+        self.assertFalse(self.kill.exists(), "same acknowledged data must not re-halt after resume")
+
+    def test_fresh_catastrophe_after_resume_rehalts(self):
+        # after a halt+resume, a NEW catastrophic day (newer than the watermark) re-halts.
+        self._write([_entry("KXHIGHX-26JUN10-B79.5", "BUY_NO", 0.88, 100, "2026-06-10")])
+        with self._setts({"KXHIGHX-26JUN10-B79.5": "yes"}):
+            pjb._check_auto_halt(self.rt)
+        self.kill.unlink(); self.rt.ctx.kill_switch_active = False
+        pjb._auto_halt_last_check[0] = 0.0
+        # a new, newer bad day arrives
+        self._write([_entry("KXHIGHX-26JUN10-B79.5", "BUY_NO", 0.88, 100, "2026-06-10"),
+                     _entry("KXHIGHY-26JUN11-B79.5", "BUY_NO", 0.88, 100, "2026-06-11")])
+        with self._setts({"KXHIGHX-26JUN10-B79.5": "yes", "KXHIGHY-26JUN11-B79.5": "yes"}):
+            pjb._check_auto_halt(self.rt)
+        self.assertTrue(self.kill.exists(), "a fresh catastrophe after resume must re-halt")
+        self.assertIn("2026-06-11", self.kill.read_text())
 
     def test_recompute_throttle(self):
         # second call within 5 min short-circuits (last_check set) -> no compute

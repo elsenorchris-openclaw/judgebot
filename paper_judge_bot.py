@@ -2633,6 +2633,29 @@ def _resolve_settlements(rt: "Runtime") -> int:
 # Trailing settled-P&L auto-halt (2026-06-16). See config AUTO_HALT_* block.
 # ─────────────────────────────────────────────────────────────────────────────
 _auto_halt_last_check = [0.0]   # last recompute ts (recompute at most every 5 min)
+_AUTO_HALT_STATE_PATH = config.DATA_DIR / "auto_halt_state.json"
+
+
+def _auto_halt_ack_through() -> "str | None":
+    """The latest climate-day already ACKNOWLEDGED by a prior auto-halt. Days at or
+    before this are excluded from re-triggering, so a manual `rm KILL` resumes on a
+    clean slate and only FRESH bleeding (newer settled days) can re-halt -- otherwise
+    the breaker would re-write KILL the instant you removed it (un-resumable)."""
+    try:
+        return json.loads(_AUTO_HALT_STATE_PATH.read_text()).get("acknowledged_through")
+    except Exception:
+        return None
+
+
+def _auto_halt_set_ack(day: str) -> None:
+    """Persist the acknowledgment watermark atomically (temp + replace)."""
+    import os
+    try:
+        tmp = Path(str(_AUTO_HALT_STATE_PATH) + ".tmp")
+        tmp.write_text(json.dumps({"acknowledged_through": day}))
+        os.replace(tmp, _AUTO_HALT_STATE_PATH)
+    except Exception:
+        log.exception("auto-halt: failed to persist ack watermark")
 
 
 def _settled_pnl_by_day() -> dict:
@@ -2713,17 +2736,24 @@ def _check_auto_halt(rt: "Runtime") -> None:
     min_days = int(getattr(config, "AUTO_HALT_MIN_DAYS", 3))
     trail_thr = float(getattr(config, "AUTO_HALT_TRAILING_LOSS_USD", -60.0))
     day_thr = float(getattr(config, "AUTO_HALT_DAY_LOSS_USD", -75.0))
-    ordered = sorted(days.keys())
+    # Exclude days already acknowledged by a prior halt+resume: only settled days
+    # NEWER than the watermark can (re-)trigger, so `rm KILL` resumes on a clean
+    # slate and the breaker re-fires only on FRESH bleeding.
+    ack = _auto_halt_ack_through()
+    active = {d: v for d, v in days.items() if ack is None or d > ack}
+    if not active:
+        return
+    ordered = sorted(active.keys())
     recent = ordered[-win:]
     reason = None
-    # (a) single-day catastrophe — fires regardless of min-days
-    worst_day = min(ordered, key=lambda d: days[d])
-    if days[worst_day] <= day_thr:
-        reason = (f"single-day settled P&L {worst_day} ${days[worst_day]:+.2f} "
+    # (a) single-day catastrophe — fires regardless of min-days (recent days only)
+    worst_day = min(ordered, key=lambda d: active[d])
+    if active[worst_day] <= day_thr:
+        reason = (f"single-day settled P&L {worst_day} ${active[worst_day]:+.2f} "
                   f"<= catastrophe ${day_thr:.2f}")
     # (b) trailing-window bleed
     if reason is None and len(recent) >= min_days:
-        cum = sum(days[d] for d in recent)
+        cum = sum(active[d] for d in recent)
         if cum <= trail_thr:
             reason = (f"trailing {len(recent)}d settled P&L ${cum:+.2f} "
                       f"<= halt ${trail_thr:.2f} (days {recent[0]}..{recent[-1]})")
@@ -2736,6 +2766,8 @@ def _check_auto_halt(rt: "Runtime") -> None:
     except Exception:
         log.exception("auto-halt: failed to write KILL file")
         return
+    # acknowledge everything settled up to now so a later `rm KILL` resumes cleanly
+    _auto_halt_set_ack(max(days.keys()))
     rt.ctx.kill_switch_active = True   # enforce THIS cycle, not just next
     log.error("🛑 AUTO-HALT TRIGGERED: %s — wrote KILL, all buys blocked", reason)
     try:
