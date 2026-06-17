@@ -1409,7 +1409,7 @@ BLEND_FORECAST_LOW_ENABLED: bool = True
 # this deep lead (climo-peak-3h) for serve-consistency. LOW unchanged (deep-lead
 # untested for lows). Set ENABLED=False to revert to the per-station windows.
 BLEND_DEEP_WINDOW_ENABLED: bool = True
-BLEND_DEEP_WINDOW_HOURS: tuple = (4.0, 2.5)
+BLEND_DEEP_WINDOW_HOURS: tuple = (5.0, 2.5)  # 2026-06-17 (autonomous, window-curve investigation): deep end 4.0->5.0 => [peak-5, peak-2.5]. HIGH was "barely buying" -- 1351 in-window-but-1351-outside-window blocks/day, the window capping at peak-4 EXCLUDED the most profitable leads. Quality-gated window curve (5383 candidate-leads x 8038 market results, ground-truth-anchored): the DEEPEST part of the OLD window [3.5,4.0) was its weak spot (-1.2c/ct) while JUST BEYOND it [4.0,5.0) = +16.2c/ct BOTH halves (H1+23/H2+10, n=30). Deepening [2.5,4.0]->[2.5,5.0]: n 43->74 (~2x volume), EV +10.0->+12.9c/ct, H2 +0.7->+5.6 -- a STRICT win (more volume AND more profit AND better recent half). Aligns w/ the original deep-window thesis (market softest far from peak), just deeper than 6/2 set it. ⚠️STAGED/conservative: the reconstruction looks even better at 6-8h (+28c/ct, 100%WR) BUT that's likely thin early-AM books mispricing the ask + the model is calibrated for ~peak-3.25h (extrapolation) + ZERO live fills outside the old window = the "too good" reconstruction trap; capped at 5.0. The peak-4..-5 leads will now generate REAL fills -> validate via tools/replay_backtest.py before extending deeper. REVERT ->4.0 if the [4,5) band bleeds live. # PRIOR (4.0,2.5)
 BLEND_DEEP_WINDOW_HOURS_LOW: tuple = (3.0, 1.5)
 # 2026-06-02: LOW forecast-lock. When the hourly forecast says the daily low already
 # happened (forecast-min-time > MARGIN_H behind the eval time), anchor mu to the
