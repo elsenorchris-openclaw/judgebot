@@ -102,3 +102,20 @@ def _disable_climate_day_guard_for_suite():
         return
     with mock.patch.object(config, "CLIMATE_DAY_GUARD_ENABLED", False):
         yield
+
+
+@pytest.fixture(autouse=True)
+def _enable_low_exec_for_gate_tests():
+    """2026-06-17: AUTO_EXEC_LOW_ENABLED was disabled in prod (LOW is structurally
+    -EV, large-sample both-halves). But the LOW *gate* tests (pno floor, B-NO-only,
+    spread, irrev-lock LOW) build LOW buys to exercise their target gate, which the
+    global LOW-paused check would short-circuit. Default LOW-exec ON for the suite so
+    those gate tests still test their gate; prod stays disabled. Mirrors the
+    BLEND_ONLY / climate-day default fixtures above."""
+    try:
+        import config
+    except Exception:
+        yield
+        return
+    with mock.patch.object(config, "AUTO_EXEC_LOW_ENABLED", True):
+        yield
