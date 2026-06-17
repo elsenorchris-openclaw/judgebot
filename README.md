@@ -16,7 +16,7 @@ Live bot on EC2 `54.225.174.220`, dir `~/paper_judge_bot`, systemd service
 > large-sample reconstruction — the quality gates carry the edge, the bar above ~14 was
 > redundant; +25% volume, both-halves-+), **spread ≤5c, price 25–80c, clearance ≥1°F
 > (B-NO) / P(NO)≥0.6 (T-NO), ≤3 HIGH fills/day** (`PUSH_MAX_HIGH_FILLS_PER_DAY`,
-> correlated-miss-day cap), deep window, taker, 1-bracket/station, won't-reach veto.
+> correlated-miss-day cap), deep window **[peak−5, peak−2.5]** (deepened 4→5h on 6/17 — the window-curve showed leads 4–5h out are +16c/ct both-halves and were being excluded; ~2x volume), taker, 1-bracket/station, won't-reach veto.
 > · **LOW DISABLED** (`AUTO_EXEC_LOW_ENABLED=False`, 6/17): structurally −EV at every
 > gate, large-sample both-halves (LOW-NO −10.3c/ct; current stack −2.4c/ct; lifetime
 > live −16c/ct) — HIGH carries the strategy. · edge tiers OFF · no sells.
