@@ -12,15 +12,14 @@ Live bot on EC2 `54.225.174.220`, dir `~/paper_judge_bot`, systemd service
 
 > 🔄 **2026-06-10: TRADING the market-BLEND strategy at $1/$1 (Chris).** Resumed from
 > the 6/9 halt at owner direction. Live config = the blend path TIGHTENED to the
-> live-fill-validated core (the 6/10 tactic sweep — see below): **HIGH $5 NO-only ≥18pp,
-> spread ≤5c, price 25–80c** (deep window, taker, thin-margin 0.5, 1-bracket/station)
-> + **won't-reach veto** (`PUSH_HIGH_NO_SKIP_WONT_REACH`, 6/10 HIGH deep-dive `6e318fb`: a B-NO
-> requires μ > cap+0.5 — only short brackets the heat blows past; the μ-below-bracket NO was
-> −32.3c/ct in all 4 splits; dropping it lifts the stream-kept book +7.8→+14.1c/ct, n=43)
-> · **LOW $5 B-NO-only ≥8pp, price 40–80c, spread ≤5c, P(NO)≥0.55** (`PUSH_LOW_MIN_PNO`,
-> maker-at-mid + taker-fallback; the 6/10 LOW deep-dive stack, commit `99d657c` — expect
-> ~1 LOW fill per 1–2 nights) · edge tiers OFF · no sells. Sizes $1→$5 both books
-> 6/10 (`b46d6d1`, owner call ahead of settled fills on the new stacks).
+> live-fill-validated core: **HIGH $10 NO-only, edge ≥14pp** (lowered 18→14 on 6/17
+> large-sample reconstruction — the quality gates carry the edge, the bar above ~14 was
+> redundant; +25% volume, both-halves-+), **spread ≤5c, price 25–80c, clearance ≥1°F
+> (B-NO) / P(NO)≥0.6 (T-NO), ≤3 HIGH fills/day** (`PUSH_MAX_HIGH_FILLS_PER_DAY`,
+> correlated-miss-day cap), deep window, taker, 1-bracket/station, won't-reach veto.
+> · **LOW DISABLED** (`AUTO_EXEC_LOW_ENABLED=False`, 6/17): structurally −EV at every
+> gate, large-sample both-halves (LOW-NO −10.3c/ct; current stack −2.4c/ct; lifetime
+> live −16c/ct) — HIGH carries the strategy. · edge tiers OFF · no sells.
 > 🛑 **AUTO-HALT (`6/16`, `e381d1d`+`948da07`):** a trailing settled-P&L circuit breaker
 > now writes the `KILL` file automatically (the GUARDRAILS `daily_loss_kill_usd` breaker
 > is inert here — it only watches sell-realized P&L, but this bot is buy-and-hold, which
