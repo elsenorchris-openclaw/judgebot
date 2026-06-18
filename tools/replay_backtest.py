@@ -113,17 +113,54 @@ def rep(rs, lab):
     h1 = sum(r["pl"] for r in rs if r["day"] <= "2026-06-08"); h2 = pl - h1
     return f"{lab:30s} n={n:3d} WR={100*w/n:3.0f}% ${pl:+8.2f} | H1 ${h1:+7.2f} H2 ${h2:+7.2f}"
 
+def _post_discord(msg):
+    import os as _os
+    tok = _os.environ.get("DISCORD_BOT_TOKEN", "")
+    chan = _os.environ.get("DISCORD_TRADE_CHANNEL_ID", "1511264871151304725")
+    if not (tok and chan):
+        return
+    try:
+        import httpx
+        httpx.post(f"https://discord.com/api/v10/channels/{chan}/messages",
+                   json={"content": msg},
+                   headers={"Authorization": f"Bot {tok}", "Content-Type": "application/json"},
+                   timeout=8.0)
+    except Exception as e:
+        print("discord post failed:", e)
+
+
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser(); ap.add_argument("--by-day", action="store_true"); a = ap.parse_args()
+    import datetime as _dt
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--by-day", action="store_true")
+    ap.add_argument("--post", action="store_true", help="post the daily config-validation to Discord")
+    a = ap.parse_args()
     fills = build()
     base = sum(r["pl"] for r in fills)
+    cur = [r for r in fills if cur_config(r)]
     print(f"=== FAITHFUL REPLAY ({len(fills)} settled fills since 6/2) ===")
     print(rep(fills, "GROUND TRUTH (all real fills)"))
-    print(rep([r for r in fills if cur_config(r)], "CURRENT live config (counterfactual)"))
-    print(rep([r for r in fills if r["series"]=="HIGH" and cur_config(r)], "  HIGH"))
-    print(rep([r for r in fills if r["series"]=="LOW" and cur_config(r)], "  LOW"))
+    print(rep(cur, "CURRENT live config (counterfactual)"))
+    print(rep([r for r in cur if r["series"]=="HIGH"], "  HIGH"))
+    print(rep([r for r in cur if r["series"]=="LOW"], "  LOW"))
+    # RECENT window = the live-validation of the shipped tightening (gates landed ~6/11-17).
+    # This is the number that actually says "is the current config working on FRESH fills".
+    cut = (_dt.date.today() - _dt.timedelta(days=7)).strftime("%Y-%m-%d")
+    recent = [r for r in fills if r["day"] >= cut]
+    rc = [r for r in recent if cur_config(r)]
+    print(rep(recent, f"recent7 GROUND TRUTH (>= {cut})"))
+    print(rep(rc, "recent7 current-config"))
     if a.by_day:
         bd = collections.defaultdict(float)
         for r in fills: bd[r["day"]] += r["pl"]
         print("by day (ground truth):", " ".join(f"{d[-2:]}:{bd[d]:+.0f}" for d in sorted(bd)))
     print(f"\nbaseline ${base:+.2f} is the ground-truth wallet P&L this tool must reproduce.")
+    if a.post:
+        def _pl(rs): return sum(r["pl"] for r in rs)
+        def _wr(rs): return (100*sum(r["won"] for r in rs)/len(rs)) if rs else 0
+        msg = ("\U0001F4D0 **Blend config-validation (faithful replay vs wallet)**\n"
+               f"recent7 (>= {cut}): real **${_pl(recent):+.2f}** ({len(recent)} fills) | "
+               f"current-config **${_pl(rc):+.2f}** ({len(rc)} fills, {_wr(rc):.0f}% WR)\n"
+               f"era-since-6/2: real ${base:+.2f} | current-config ${_pl(cur):+.2f} ({len(cur)} fills)")
+        _post_discord(msg)
+        print("posted to Discord.")
