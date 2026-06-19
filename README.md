@@ -16,7 +16,7 @@ Live bot on EC2 `54.225.174.220`, dir `~/paper_judge_bot`, systemd service
 > large-sample reconstruction — the quality gates carry the edge, the bar above ~14 was
 > redundant; +25% volume, both-halves-+), **spread ≤5c, price 25–80c, clearance ≥1°F
 > (B-NO) / P(NO)≥0.6 (T-NO), ≤3 HIGH fills/day** (`PUSH_MAX_HIGH_FILLS_PER_DAY`,
-> correlated-miss-day cap), deep window **[peak−5, peak−2.5]** (deepened 4→5h on 6/17 — the window-curve showed leads 4–5h out are +16c/ct both-halves and were being excluded; ~2x volume), taker, 1-bracket/station, won't-reach veto.
+> correlated-miss-day cap), deep window **[peak−3.5, peak−2.0]** (6/18, Chris-approved — the 6/17 peak−5 deepening chased phantom-ask reconstruction EV [6–8h bins reconstruct +EV but have 0 real fills]; full blend-era shadow-log analysis showed the NEAR edge is the lever: pulling it peak−2.5→−2.0 [trade closer to peak = sharper forecast + more liquid] flips the recent half from neg to pos — [peak−3.5,−2.0] is +8.5c/ct, positive in all 4 splits), taker, 1-bracket/station, won't-reach veto.
 > · **LOW DISABLED** (`AUTO_EXEC_LOW_ENABLED=False`, 6/17): structurally −EV at every
 > gate, large-sample both-halves (LOW-NO −10.3c/ct; current stack −2.4c/ct; lifetime
 > live −16c/ct) — HIGH carries the strategy. · edge tiers OFF · no sells.
@@ -80,7 +80,7 @@ settled ≈ market_implied_μ + running_extreme(wethr obs) + cur_temp + 7 OpenMe
 predicted with a **fixed calibrated σ** (~1.17°F HIGH / ~1.51°F LOW). The edge is
 that the market is under-confident (its implied σ is too wide) and under-weights
 the multi-model NWP. It bets a bracket when the blend's P(bracket) disagrees with
-the market by the edge floor, at the deep window (peak−4..−2.5h HIGH, min−3..−1.5h
+the market by the edge floor, at the deep window (peak−3.5..−2.0h HIGH, min−3..−1.5h
 LOW), where the market is softest. See `memory/project_blend_edge_FOUND_20260601`.
 
 **NN-matching (`nn_match_fast`) is now only a FAIL-SAFE FALLBACK** μ, used when the
