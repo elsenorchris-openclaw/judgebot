@@ -11,6 +11,7 @@ from __future__ import annotations
 import base64
 import logging
 import time
+import uuid
 from pathlib import Path
 from typing import Any, Optional
 
@@ -278,6 +279,66 @@ def _parse_kalshi_error(exc: Exception) -> tuple[str, str]:
     return ("unknown", msg)
 
 
+def _order_body_v2(ticker: str, action: str, side: str, count: int, price_cents: int,
+                   expiration_ts: int | None = None,
+                   post_only: bool = False) -> dict[str, Any]:
+    """Build a Kalshi create-order-v2 body (POST /portfolio/events/orders).
+
+    The v2 API retired the action/yes_price/no_price/integer-cent model on
+    2026-06-27 (HTTP 410 deprecated_v1_order_endpoint on the legacy
+    /portfolio/orders POST). v2 quotes a SINGLE YES book with bid/ask sides and
+    fixed-point dollar prices:
+        side="bid" = buy YES,  side="ask" = sell YES (== buy NO at 1 - price).
+    So  buy/yes & sell/no -> bid ;  buy/no & sell/yes -> ask.
+    The YES-book price in cents is price_cents for a YES order, else
+    (100 - price_cents) for a NO order (buying NO @ Pc == selling YES @ (100-P)c).
+
+    time_in_force defaults to good_till_canceled — matching the legacy default of
+    a resting limit the caller manages via wait_for_fill + cancel_order. A passed
+    expiration_ts becomes expiration_time (v2 requires GTC for that field)."""
+    yes_c = price_cents if side == "yes" else (100 - price_cents)
+    is_bid = (action == "buy") == (side == "yes")
+    body: dict[str, Any] = {
+        "ticker": ticker,
+        "side": "bid" if is_bid else "ask",
+        "count": str(int(count)),
+        "price": f"{yes_c / 100:.2f}",
+        "time_in_force": "good_till_canceled",
+        "self_trade_prevention_type": "taker_at_cross",
+        "client_order_id": uuid.uuid4().hex,
+    }
+    if expiration_ts:
+        body["expiration_time"] = int(expiration_ts)
+    if post_only:
+        body["post_only"] = True
+    return body
+
+
+def _parse_order_v2(r: dict) -> tuple[Optional[str], str, int]:
+    """Parse a create-order-v2 response. The body is FLAT (no 'order' wrapper, no
+    status field): order_id + fill_count + remaining_count, the counts as
+    fixed-point strings. Returns (order_id, synthesized_status, filled_int) so the
+    legacy {ok, order_id, status, filled} caller contract is preserved. Status is
+    synthesized: 'executed' (immediate fill, nothing resting), 'partial' (some
+    filled, some resting), or 'resting' (nothing filled yet)."""
+    oid = r.get("order_id")
+    try:
+        filled = int(float(r.get("fill_count") or 0))
+    except (TypeError, ValueError):
+        filled = 0
+    try:
+        remaining = int(float(r.get("remaining_count")))
+    except (TypeError, ValueError):
+        remaining = None
+    if remaining == 0 and filled > 0:
+        status = "executed"
+    elif filled > 0:
+        status = "partial"
+    else:
+        status = "resting"
+    return oid, status, filled
+
+
 def place_buy(ticker: str, side: str, count: int, price_cents: int,
               expiration_ts: int | None = None, post_only: bool = False) -> dict:
     """Place a limit BUY at price_cents. side ∈ {"yes", "no"}.
@@ -287,23 +348,14 @@ def place_buy(ticker: str, side: str, count: int, price_cents: int,
       - ok=False with error_code on failure (caller can branch on
         "insufficient_balance" to retry with reduced size)
     Honors DRY_RUN.
+
+    2026-06-27: migrated to create-order-v2 (POST /portfolio/events/orders);
+    see _order_body_v2 for the YES-book bid/ask mapping.
     """
     if side not in ("yes", "no"):
         log.warning("place_buy bad side: %s", side)
         return {"ok": False, "order_id": None, "status": None, "filled": 0,
                 "error_code": "bad_side", "error_msg": f"bad side: {side}"}
-    body: dict[str, Any] = {
-        "ticker": ticker,
-        "action": "buy",
-        "side": side,
-        "type": "limit",
-        "count": count,
-    }
-    body["yes_price" if side == "yes" else "no_price"] = price_cents
-    if expiration_ts:
-        body["expiration_ts"] = int(expiration_ts)
-    if post_only:
-        body["post_only"] = True
 
     if config.DRY_RUN:
         fake = f"DRYRUN-buy-{ticker}-{side}-{int(time.time()*1000)}"
@@ -312,19 +364,11 @@ def place_buy(ticker: str, side: str, count: int, price_cents: int,
         return {"ok": True, "order_id": fake, "status": "executed",
                 "filled": count, "error_code": None, "error_msg": None}
 
+    body = _order_body_v2(ticker, "buy", side, count, price_cents,
+                          expiration_ts=expiration_ts, post_only=post_only)
     try:
-        r = post("/trade-api/v2/portfolio/orders", body)
-        order = r.get("order") or {}
-        oid = order.get("order_id")
-        status = order.get("status", "?")
-        # Kalshi marks status="executed" once fully filled. fill_count_fp is
-        # the contracts filled. If status is executed, treat filled = count.
-        try:
-            filled = int(float(order.get("fill_count_fp") or 0))
-        except (TypeError, ValueError):
-            filled = 0
-        if status == "executed":
-            filled = max(filled, count)
+        r = post("/trade-api/v2/portfolio/events/orders", body)
+        oid, status, filled = _parse_order_v2(r)
         log.info("BUY %dx %s @ %dc on %s -> %s (%s, filled=%d)",
                  count, side, price_cents, ticker, oid, status, filled)
         return {"ok": True, "order_id": oid, "status": status, "filled": filled,
@@ -342,14 +386,6 @@ def place_sell(ticker: str, side: str, count: int, price_cents: int) -> Optional
     if side not in ("yes", "no"):
         log.warning("place_sell bad side: %s", side)
         return None
-    body: dict[str, Any] = {
-        "ticker": ticker,
-        "action": "sell",
-        "side": side,
-        "type": "limit",
-        "count": count,
-    }
-    body["yes_price" if side == "yes" else "no_price"] = price_cents
 
     if config.DRY_RUN:
         fake = f"DRYRUN-sell-{ticker}-{side}-{int(time.time()*1000)}"
@@ -357,17 +393,10 @@ def place_sell(ticker: str, side: str, count: int, price_cents: int) -> Optional
                  count, side, price_cents, ticker, fake)
         return {"order_id": fake, "status": "executed", "filled": count}
 
+    body = _order_body_v2(ticker, "sell", side, count, price_cents)
     try:
-        r = post("/trade-api/v2/portfolio/orders", body)
-        order = r.get("order") or {}
-        oid = order.get("order_id")
-        status = order.get("status", "?")
-        try:
-            filled = int(float(order.get("fill_count_fp") or 0))
-        except (TypeError, ValueError):
-            filled = 0
-        if status == "executed":
-            filled = max(filled, count)
+        r = post("/trade-api/v2/portfolio/events/orders", body)
+        oid, status, filled = _parse_order_v2(r)
         log.info("SELL %dx %s @ %dc on %s -> %s (%s, filled=%d)",
                  count, side, price_cents, ticker, oid, status, filled)
         return {"order_id": oid, "status": status, "filled": filled}
@@ -381,7 +410,10 @@ def cancel_order(order_id: str) -> None:
         log.info("DRY_RUN cancel %s", order_id)
         return
     try:
-        delete(f"/trade-api/v2/portfolio/orders/{order_id}")
+        # v2 cancel lives under events/orders (the legacy /portfolio/orders DELETE
+        # is retired alongside create). Reads (get_order / wait_for_fill GET) still
+        # use the legacy /portfolio/orders/{id} path, which remains live.
+        delete(f"/trade-api/v2/portfolio/events/orders/{order_id}")
     except Exception as e:
         log.warning("cancel %s failed: %s", order_id, e)
 

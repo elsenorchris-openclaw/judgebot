@@ -1,5 +1,15 @@
 # paper_judge_bot — Blend-Forecast Kalshi Weather Bot
 
+> **2026-06-27 — Kalshi v2 order-endpoint migration (REQUIRED FIX).** Kalshi retired the legacy
+> create-order POST `/trade-api/v2/portfolio/orders` (now HTTP 410 `deprecated_v1_order_endpoint`).
+> `kalshi_client.py` migrated to `POST /trade-api/v2/portfolio/events/orders` — single YES-book
+> bid/ask model, fixed-point dollar-string prices (bid=buy YES, ask=sell YES=buy NO@1-price), flat
+> response (order_id/fill_count/remaining_count, no `order` wrapper/status). `cancel_order` ->
+> `DELETE .../events/orders/{id}`. Reads unchanged (wait_for_fill/get_order GET `/portfolio/orders/{id}`,
+> balance, positions, orderbook). Caller contract `{ok,order_id,status,filled}` preserved; default
+> time_in_force=GTC keeps legacy resting-limit behavior. Verified live on the real wallet. Pre-migration
+> client backed up to `kalshi_client.py.bak.20260627`.
+
 > ⚠️ **This is NOT the old "judgebot."** It no longer uses NN-matching as its primary
 > forecast, and it has **no LLM/Claude in the decision path**. It trades off a
 > **supervised blend forecast**. The in-code comments and docstrings are largely
