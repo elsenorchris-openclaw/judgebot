@@ -20,6 +20,19 @@ Live bot on EC2 `54.225.174.220`, dir `~/paper_judge_bot`, systemd service
 (branch `main`). Trades daily HIGH/LOW temperature brackets on Kalshi
 (`KXHIGH*` / `KXLOW*`). Shares the **v1max Kalshi wallet** with `locklag_bot`.
 
+> 🌬️ **2026-06-30: HIGH-NO STABLE-AIRMASS WIND GATE (Chris-approved).** New gate
+> `PUSH_HIGH_NO_MAX_WIND_MPH=7.0` (`nn_shadow_worker._try_auto_execute`, after the tier1
+> wind block) — skip a HIGH BUY_NO when decision-time **sustained wind > 7 mph**. The
+> rich-feature deep-dive (517k decisions × 255 real HIGH-NO fills × Kalshi settlements,
+> 5/19–6/30) found **≈100% of the bot's lifetime −$399 came from fills placed when wind
+> > 8 mph**; wind ≤7 mph = **+$153 / 64% WR** (6–7 mph band +$121 / +2.16/fill), every
+> band ≥8 mph nets −$2.2..−2.75/fill. Within-station 14/16 (not a station selector),
+> era-robust (loose+tight halves both +), LODO worst-drop +$119, z=2.43. Mechanism: calm
+> = stable high-pressure = predictable diurnal heating; windy = frontal/unsettled airmass
+> = the "correlated hot-miss" tail clearance/edge could never gate (meteorological signal,
+> not forecast margin). Cuts ~half of HIGH-NO volume; judge the settled calm-day tape
+> before any size-up. `0` disables. cf `memory/project_blend_wind_gate_20260630`.
+
 > 🔄 **2026-06-10: TRADING the market-BLEND strategy at $1/$1 (Chris).** Resumed from
 > the 6/9 halt at owner direction. Live config = the blend path TIGHTENED to the
 > live-fill-validated core: **HIGH $10 NO-only, edge ≥14pp** (lowered 18→14 on 6/17

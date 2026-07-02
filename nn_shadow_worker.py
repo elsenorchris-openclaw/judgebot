@@ -2185,6 +2185,30 @@ def _try_auto_execute(cand, packet: dict, decision: dict,
                     return False, f"tier1_wind {fld}={float(v):.1f}mph > {max_wind}mph"
             except (TypeError, ValueError):
                 pass
+    # (2b-HIGH) HIGH-NO STABLE-AIRMASS gate (2026-06-30 wind deep-dive). The
+    # mirror of the LOW frontal gate below, on the HIGH-NO side. Elevated
+    # decision-time SUSTAINED wind = unsettled / frontal / convectively-mixed
+    # airmass -> the blend forecast (and the "blows-past" NO it implies) is
+    # unreliable and temps run suppressed/volatile = the "correlated hot-miss"
+    # tail that clearance/edge could never gate (the signal is meteorological,
+    # not in the forecast margin). Real-fill evidence (255 HIGH-NO fills x Kalshi
+    # settlements, 5/19-6/30): ~100% of the bot's lifetime -$399 came from fills
+    # with sustained wind > 8mph; wind<=7mph = +$153 / 64%WR (6-7mph band +$121 /
+    # +2.16/fill), while EVERY band >=8mph nets -$2.2..-2.75/fill. Within-station
+    # 14/16 (not a station selector), era-robust (loose+tight halves both +),
+    # LODO worst-drop +$119, WR gap z=2.43. Sustained wind only (gusts are
+    # convective -> tier1 above). 0 disables. cf project_blend_wind_gate_20260630.
+    if series == "HIGH" and direction == "BUY_NO" and not _irrev:
+        hi_no_wind = float(getattr(_cfg, "PUSH_HIGH_NO_MAX_WIND_MPH", 0.0))
+        if hi_no_wind > 0:
+            ws = wo.get("wind_speed_mph")
+            try:
+                ws_f = float(ws) if ws is not None else None
+            except (TypeError, ValueError):
+                ws_f = None
+            if ws_f is not None and ws_f > hi_no_wind:
+                return False, (f"high_no_unstable_wind {ws_f:.1f}mph > "
+                               f"{hi_no_wind:.0f}mph -- frontal/unsettled airmass")
     # (2c) LOW cold-front gate. Sustained wind >= ~15kt at an overnight LOW is
     # a frontal / cold-air-advection signature. The nn matcher (trained on calm
     # nights) over-projects the daily minimum by +1.5..+3°F -- and unlike
